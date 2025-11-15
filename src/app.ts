@@ -1,14 +1,18 @@
 import express, { Application, Request, Response } from 'express';
+import { createBullBoard } from '@bull-board/api';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
+import { ExpressAdapter } from '@bull-board/express';
 import { QueueManager } from './queue/queue-manager.js';
 import { logger } from './logger.js';
 
 export class CursorAgentsApp {
   public app: Application;
   private queueManager: QueueManager;
+  private serverAdapter!: ExpressAdapter;
 
-  constructor() {
+  constructor(queueManager?: QueueManager) {
     this.app = express();
-    this.queueManager = new QueueManager();
+    this.queueManager = queueManager || new QueueManager();
     this.setupMiddleware();
     this.setupRoutes();
   }
@@ -26,6 +30,18 @@ export class CursorAgentsApp {
   }
 
   private setupRoutes(): void {
+    // Bull Board dashboard (similar to Sidekiq UI)
+    this.serverAdapter = new ExpressAdapter();
+    this.serverAdapter.setBasePath('/admin/queues');
+
+    // Initialize Bull Board with empty queues (will be updated after initialization)
+    createBullBoard({
+      queues: [],
+      serverAdapter: this.serverAdapter,
+    });
+
+    this.app.use('/admin/queues', this.serverAdapter.getRouter());
+
     // Health check endpoint
     this.app.get('/health', (_req: Request, res: Response) => {
       res.json({
@@ -109,7 +125,26 @@ export class CursorAgentsApp {
 
   async initialize(): Promise<void> {
     await this.queueManager.initialize();
+
+    // Update Bull Board with all queues after initialization
+    this.updateBullBoard();
+
     logger.info('Cursor Agents application initialized');
+    logger.info('Bull Board dashboard available at /admin/queues');
+  }
+
+  private updateBullBoard(): void {
+    // Update Bull Board with all current queues
+    const queues = this.queueManager.getQueues();
+    const queueAdapters = queues.map((queue) => new BullMQAdapter(queue));
+
+    // Recreate Bull Board with updated queues
+    createBullBoard({
+      queues: queueAdapters,
+      serverAdapter: this.serverAdapter,
+    });
+
+    logger.info('Bull Board updated with queues', { queueCount: queues.length });
   }
 
   async start(port: number): Promise<void> {

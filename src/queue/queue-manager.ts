@@ -1,7 +1,7 @@
 import { Queue, Worker, QueueEvents, RepeatOptions } from 'bullmq';
 import { Redis } from 'ioredis';
 import { logger } from '../logger.js';
-import { PromptProcessor, AgentJobData } from './prompt-processor.js';
+import { PromptProcessor, AgentJobData, PromptJobData } from './prompt-processor.js';
 
 export interface RecurringPromptOptions {
   name: string;
@@ -34,17 +34,52 @@ export interface PromptStatus {
   jobId?: string;
 }
 
+// Factory function types for dependency injection
+export type QueueFactory = (name: string, options?: { connection: Redis }) => Queue;
+
+export type WorkerFactory = (
+  name: string,
+  processor: (job: { id?: string; name?: string; data: unknown }) => Promise<void>,
+  options?: { connection: Redis; concurrency?: number }
+) => Worker;
+
+export type QueueEventsFactory = (name: string, options?: { connection: Redis }) => QueueEvents;
+
 export class QueueManager {
   private redis: Redis;
   private queues: Map<string, Queue> = new Map();
   private workers: Map<string, Worker> = new Map();
   private queueEvents: Map<string, QueueEvents> = new Map();
   private promptProcessor: PromptProcessor;
+  private queueFactory: QueueFactory;
+  private workerFactory: WorkerFactory;
+  private queueEventsFactory: QueueEventsFactory;
 
-  constructor() {
+  /**
+   * Get all queues for Bull Board dashboard
+   */
+  getQueues(): Queue[] {
+    return Array.from(this.queues.values());
+  }
+
+  constructor(
+    redis?: Redis,
+    promptProcessor?: PromptProcessor,
+    queueFactory?: QueueFactory,
+    workerFactory?: WorkerFactory,
+    queueEventsFactory?: QueueEventsFactory
+  ) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379/0';
-    this.redis = new Redis(redisUrl);
-    this.promptProcessor = new PromptProcessor();
+    this.redis = redis || new Redis(redisUrl);
+    this.promptProcessor = promptProcessor || new PromptProcessor();
+
+    // Use provided factories or default to actual BullMQ classes
+    this.queueFactory = queueFactory || ((name, options) => new Queue(name, options));
+    this.workerFactory =
+      workerFactory ||
+      ((name, processor, options) => new Worker(name, processor as never, options));
+    this.queueEventsFactory =
+      queueEventsFactory || ((name, options) => new QueueEvents(name, options));
   }
 
   async initialize(): Promise<void> {
@@ -76,17 +111,17 @@ export class QueueManager {
 
     let queue = this.queues.get(name);
     if (!queue) {
-      queue = new Queue(name, {
+      queue = this.queueFactory(name, {
         connection: this.redis,
       });
       this.queues.set(name, queue);
 
       // Create worker for this queue
-      const worker = new Worker(
+      const worker = this.workerFactory(
         name,
         async (job) => {
           logger.info('Processing job', { jobId: job.id, name: job.name, queue: name });
-          await this.promptProcessor.process(job.data);
+          await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
         },
         {
           connection: this.redis,
@@ -105,7 +140,7 @@ export class QueueManager {
       this.workers.set(name, worker);
 
       // Create queue events listener
-      const queueEvents = new QueueEvents(name, { connection: this.redis });
+      const queueEvents = this.queueEventsFactory(name, { connection: this.redis });
       this.queueEvents.set(name, queueEvents);
     }
 
@@ -215,17 +250,17 @@ export class QueueManager {
 
     let queue = this.queues.get(name);
     if (!queue) {
-      queue = new Queue(name, {
+      queue = this.queueFactory(name, {
         connection: this.redis,
       });
       this.queues.set(name, queue);
 
       // Create worker for this queue
-      const worker = new Worker(
+      const worker = this.workerFactory(
         name,
         async (job) => {
           logger.info('Processing agent job', { jobId: job.id, name: job.name });
-          await this.promptProcessor.process(job.data);
+          await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
         },
         {
           connection: this.redis,
@@ -244,7 +279,7 @@ export class QueueManager {
       this.workers.set(name, worker);
 
       // Create queue events listener
-      const queueEvents = new QueueEvents(name, { connection: this.redis });
+      const queueEvents = this.queueEventsFactory(name, { connection: this.redis });
       this.queueEvents.set(name, queueEvents);
     }
 
@@ -291,17 +326,17 @@ export class QueueManager {
 
     let queue = this.queues.get(name);
     if (!queue) {
-      queue = new Queue(name, {
+      queue = this.queueFactory(name, {
         connection: this.redis,
       });
       this.queues.set(name, queue);
 
       // Create worker for this queue
-      const worker = new Worker(
+      const worker = this.workerFactory(
         name,
         async (job) => {
           logger.info('Processing agent job', { jobId: job.id, name: job.name });
-          await this.promptProcessor.process(job.data);
+          await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
         },
         {
           connection: this.redis,
@@ -320,7 +355,7 @@ export class QueueManager {
       this.workers.set(name, worker);
 
       // Create queue events listener
-      const queueEvents = new QueueEvents(name, { connection: this.redis });
+      const queueEvents = this.queueEventsFactory(name, { connection: this.redis });
       this.queueEvents.set(name, queueEvents);
     }
 
