@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # cursor-agents Node.js application service
+  cursor-agents:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cursor-agents
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=3002
+      # Redis Configuration - Use shared Redis instance
+      - REDIS_URL=redis://redis:6379/0
+      # BullMQ Configuration
+      - BULLMQ_CONCURRENCY=${BULLMQ_CONCURRENCY:-5}
+      # Optional: Cursor runner URL for processing prompts
+      - CURSOR_RUNNER_URL=${CURSOR_RUNNER_URL:-http://cursor-runner:3001}
+    networks:
+      - virtual-assistant-network
+    # Note: Redis service is defined in jarek-va/docker-compose.yml
+    # This service connects to it via the shared network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3002/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  virtual-assistant-network:
+    external: true
+    name: virtual-assistant-network
+
