@@ -6,8 +6,9 @@ services:
       dockerfile: Dockerfile
     container_name: cursor-agents
     restart: unless-stopped
-    ports:
-      - "3002:3002"
+    # Remove port mapping - Traefik will route traffic
+    # ports:
+    #   - "3002:3002"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - PORT=3002
@@ -19,8 +20,24 @@ services:
       - CURSOR_RUNNER_URL=${CURSOR_RUNNER_URL:-http://cursor-runner:3001}
     networks:
       - virtual-assistant-network
-    # Note: Redis service is defined in jarek-va/docker-compose.yml
-    # This service connects to it via the shared network
+    # Note: Redis and Traefik services are defined in jarek-va/docker-compose.yml
+    # This service connects to them via the shared network
+    labels:
+      - "traefik.enable=true"
+      # Path-based routing - accessible at /agents/* on the same domain
+      - "traefik.http.routers.cursor-agents.rule=Host(`${DOMAIN_NAME:-localhost}`) && PathPrefix(`/agents`)"
+      - "traefik.http.routers.cursor-agents.entrypoints=websecure"
+      - "traefik.http.routers.cursor-agents.tls.certresolver=letsencrypt"
+      - "traefik.http.services.cursor-agents.loadbalancer.server.port=3002"
+      # Strip /agents prefix before forwarding to the service
+      - "traefik.http.middlewares.cursor-agents-stripprefix.stripprefix.prefixes=/agents"
+      # Security headers middleware
+      - "traefik.http.middlewares.cursor-agents-headers.headers.sslredirect=true"
+      - "traefik.http.middlewares.cursor-agents-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.cursor-agents-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.cursor-agents-headers.headers.stsPreload=true"
+      # Apply both strip prefix and security headers
+      - "traefik.http.routers.cursor-agents.middlewares=cursor-agents-stripprefix,cursor-agents-headers"
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3002/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s

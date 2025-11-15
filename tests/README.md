@@ -125,24 +125,23 @@ describe('ComponentName', () => {
 ## Current Status
 
 - ✅ **PromptProcessor**: 11/11 tests passing
-- ✅ **QueueManager**: Tests written, some mocking issues to resolve
-- ⚠️ **App**: Tests written, mocking issues with QueueManager
-- ⚠️ **MCP Server**: Tests written, needs refinement
-- ⚠️ **Integration**: Tests written, needs refinement
+- ✅ **QueueManager**: 16/16 tests passing
+- ✅ **App**: 15/15 tests passing
+- ✅ **MCP Server**: 9/9 tests passing
+- ✅ **Integration**: 5/5 tests passing
 
-## Known Issues
+**Total: 56/56 tests passing** ✅
 
-1. **QueueManager Mocking**: The QueueManager mock needs to be properly injected into CursorAgentsApp
-2. **Bull Board Mocking**: Module resolution for @bull-board packages in Jest
-3. **Test Cleanup**: Some tests may need better cleanup to prevent resource leaks
+## Test Architecture
+
+The tests are **application-level tests** that test the Express application directly using `supertest`. They do not test Traefik routing configuration. The application receives requests at standard paths (e.g., `/health`, `/queues`, `/admin/queues`), and Traefik handles the path prefix (`/agents`) at the reverse proxy level.
 
 ## Next Steps
 
-1. Fix QueueManager mocking in app tests
-2. Resolve Bull Board module resolution in Jest
-3. Add more edge case tests
-4. Improve test coverage for error scenarios
-5. Add performance tests for high-volume job processing
+1. Add more edge case tests
+2. Improve test coverage for error scenarios
+3. Add performance tests for high-volume job processing
+4. Add end-to-end tests that include Traefik routing (optional)
 
 ## Coverage Goals
 
