@@ -38,7 +38,7 @@ export class QueueManager {
 
   async initialize(): Promise<void> {
     logger.info('Initializing QueueManager...');
-    
+
     // Test Redis connection
     try {
       await this.redis.ping();
@@ -50,7 +50,7 @@ export class QueueManager {
 
     // Start processing existing queues
     await this.loadExistingQueues();
-    
+
     logger.info('QueueManager initialized');
   }
 
@@ -62,7 +62,7 @@ export class QueueManager {
 
   async addRecurringPrompt(options: RecurringPromptOptions): Promise<{ id: string; name: string }> {
     const { name, prompt, schedule, options: jobOptions } = options;
-    
+
     let queue = this.queues.get(name);
     if (!queue) {
       queue = new Queue(name, {
@@ -100,16 +100,14 @@ export class QueueManager {
 
     // Add recurring job
     const repeatOptions: RepeatOptions =
-      typeof schedule === 'string'
-        ? { pattern: schedule }
-        : schedule;
+      typeof schedule === 'string' ? { pattern: schedule } : schedule;
 
     const jobId = `recurring:${name}`;
-    
+
     // Remove existing repeatable job if it exists
     try {
       await queue.removeRepeatableByKey(jobId);
-    } catch (error) {
+    } catch {
       // Ignore if job doesn't exist
     }
 
@@ -224,4 +222,3 @@ export class QueueManager {
     logger.info('Redis connection closed');
   }
 }
-

@@ -1,0 +1,33 @@
+name: Deploy cursor-agents
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+            cd cursor-agents || { echo "Directory cursor-agents not found"; exit 1; }
+            git fetch origin || { echo "Git fetch failed"; exit 1; }
+            BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
+            git reset --hard origin/$BRANCH || { echo "Git reset failed"; exit 1; }
+            docker compose build cursor-agents || { echo "Docker build failed"; exit 1; }
+            docker compose up -d cursor-agents || { echo "Docker up failed"; exit 1; }
+            echo "Deployment completed successfully"
+          script_stop: true
+          debug: true
+

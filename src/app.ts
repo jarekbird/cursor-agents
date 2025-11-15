@@ -50,7 +50,7 @@ export class CursorAgentsApp {
     this.app.post('/prompts/recurring', async (req: Request, res: Response) => {
       try {
         const { name, prompt, schedule, options } = req.body;
-        
+
         if (!name || !prompt || !schedule) {
           return res.status(400).json({
             error: 'Missing required fields: name, prompt, schedule',
@@ -80,7 +80,7 @@ export class CursorAgentsApp {
       try {
         const { name } = req.params;
         const status = await this.queueManager.getPromptStatus(name);
-        
+
         if (!status) {
           return res.status(404).json({ error: 'Prompt not found' });
         }
@@ -124,4 +124,3 @@ export class CursorAgentsApp {
     logger.info('Cursor Agents application shut down');
   }
 }
-

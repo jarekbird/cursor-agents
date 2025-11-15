@@ -8,7 +8,7 @@ const port = parseInt(process.env.PORT || '3002', 10);
 
 async function main(): Promise<void> {
   const app = new CursorAgentsApp();
-  
+
   try {
     await app.initialize();
     await app.start(port);
@@ -34,4 +34,3 @@ main().catch((error) => {
   console.error('Unhandled error:', error);
   process.exit(1);
 });
-

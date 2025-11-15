@@ -1,4 +1,3 @@
-import { Job } from 'bullmq';
 import { logger } from '../logger.js';
 
 export interface PromptJobData {
@@ -22,7 +21,7 @@ export class PromptProcessor {
 
     // TODO: Implement actual prompt processing
     // This could call cursor-runner API, send to cursor-cli, etc.
-    
+
     // For now, just log the processing
     logger.info('Prompt processed successfully', {
       prompt: prompt.substring(0, 100) + '...',
@@ -41,4 +40,3 @@ export class PromptProcessor {
     // });
   }
 }
-
