@@ -1,7 +1,7 @@
 import { Queue, Worker, QueueEvents, RepeatOptions } from 'bullmq';
 import { Redis } from 'ioredis';
 import { logger } from '../logger.js';
-import { PromptProcessor } from './prompt-processor.js';
+import { PromptProcessor, AgentJobData } from './prompt-processor.js';
 
 export interface RecurringPromptOptions {
   name: string;
@@ -13,6 +13,17 @@ export interface RecurringPromptOptions {
     maxIterations?: number;
     [key: string]: unknown;
   };
+}
+
+export interface AgentConfig {
+  name: string;
+  targetUrl: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  headers?: Record<string, string>;
+  body?: unknown;
+  schedule?: string; // Cron pattern or interval for recurring jobs
+  oneTime?: boolean; // If true, run once immediately
+  timeout?: number; // Request timeout in milliseconds
 }
 
 export interface PromptStatus {
@@ -74,7 +85,7 @@ export class QueueManager {
       const worker = new Worker(
         name,
         async (job) => {
-          logger.info('Processing prompt job', { jobId: job.id, name: job.name });
+          logger.info('Processing job', { jobId: job.id, name: job.name, queue: name });
           await this.promptProcessor.process(job.data);
         },
         {
@@ -194,6 +205,174 @@ export class QueueManager {
 
   async listQueues(): Promise<string[]> {
     return Array.from(this.queues.keys());
+  }
+
+  /**
+   * Add a one-time agent that executes immediately
+   */
+  async addOneTimeAgent(config: AgentConfig): Promise<{ id: string; name: string }> {
+    const { name, targetUrl, method = 'POST', headers = {}, body, timeout = 30000 } = config;
+
+    let queue = this.queues.get(name);
+    if (!queue) {
+      queue = new Queue(name, {
+        connection: this.redis,
+      });
+      this.queues.set(name, queue);
+
+      // Create worker for this queue
+      const worker = new Worker(
+        name,
+        async (job) => {
+          logger.info('Processing agent job', { jobId: job.id, name: job.name });
+          await this.promptProcessor.process(job.data);
+        },
+        {
+          connection: this.redis,
+          concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
+        }
+      );
+
+      worker.on('completed', (job) => {
+        logger.info('Agent job completed', { jobId: job.id, name: job.name });
+      });
+
+      worker.on('failed', (job, err) => {
+        logger.error('Agent job failed', { jobId: job?.id, name: job?.name, error: err });
+      });
+
+      this.workers.set(name, worker);
+
+      // Create queue events listener
+      const queueEvents = new QueueEvents(name, { connection: this.redis });
+      this.queueEvents.set(name, queueEvents);
+    }
+
+    // Add one-time job
+    const jobData: AgentJobData = {
+      targetUrl,
+      method,
+      headers,
+      body,
+      timeout,
+    };
+
+    const job = await queue.add(name, jobData, {
+      jobId: `agent:${name}:${Date.now()}`,
+    });
+
+    logger.info('One-time agent added', {
+      name,
+      jobId: job.id,
+      targetUrl,
+      method,
+    });
+
+    return { id: job.id!, name: job.name! };
+  }
+
+  /**
+   * Add a recurring agent that executes on a schedule
+   */
+  async addRecurringAgent(config: AgentConfig): Promise<{ id: string; name: string }> {
+    const {
+      name,
+      targetUrl,
+      method = 'POST',
+      headers = {},
+      body,
+      schedule,
+      timeout = 30000,
+    } = config;
+
+    if (!schedule) {
+      throw new Error('Schedule is required for recurring agents');
+    }
+
+    let queue = this.queues.get(name);
+    if (!queue) {
+      queue = new Queue(name, {
+        connection: this.redis,
+      });
+      this.queues.set(name, queue);
+
+      // Create worker for this queue
+      const worker = new Worker(
+        name,
+        async (job) => {
+          logger.info('Processing agent job', { jobId: job.id, name: job.name });
+          await this.promptProcessor.process(job.data);
+        },
+        {
+          connection: this.redis,
+          concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
+        }
+      );
+
+      worker.on('completed', (job) => {
+        logger.info('Agent job completed', { jobId: job.id, name: job.name });
+      });
+
+      worker.on('failed', (job, err) => {
+        logger.error('Agent job failed', { jobId: job?.id, name: job?.name, error: err });
+      });
+
+      this.workers.set(name, worker);
+
+      // Create queue events listener
+      const queueEvents = new QueueEvents(name, { connection: this.redis });
+      this.queueEvents.set(name, queueEvents);
+    }
+
+    // Add recurring job
+    const repeatOptions: RepeatOptions =
+      typeof schedule === 'string' ? { pattern: schedule } : schedule;
+
+    const jobId = `agent:${name}`;
+
+    // Remove existing repeatable job if it exists
+    try {
+      await queue.removeRepeatableByKey(jobId);
+    } catch {
+      // Ignore if job doesn't exist
+    }
+
+    const jobData: AgentJobData = {
+      targetUrl,
+      method,
+      headers,
+      body,
+      timeout,
+    };
+
+    const job = await queue.add(name, jobData, {
+      repeat: repeatOptions,
+      jobId,
+    });
+
+    logger.info('Recurring agent added', {
+      name,
+      jobId: job.id,
+      targetUrl,
+      method,
+      schedule: repeatOptions.pattern || (repeatOptions as { cron?: string }).cron || 'unknown',
+    });
+
+    return { id: job.id!, name: job.name! };
+  }
+
+  /**
+   * Get agent status (alias for getPromptStatus for consistency)
+   */
+  async getAgentStatus(name: string): Promise<PromptStatus | null> {
+    return this.getPromptStatus(name);
+  }
+
+  /**
+   * Remove an agent (alias for removeRecurringPrompt for consistency)
+   */
+  async removeAgent(name: string): Promise<void> {
+    return this.removeRecurringPrompt(name);
   }
 
   async shutdown(): Promise<void> {

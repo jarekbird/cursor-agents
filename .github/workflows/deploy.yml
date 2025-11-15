@@ -21,10 +21,37 @@ jobs:
           port: ${{ secrets.SSH_PORT || 22 }}
           script: |
             set -e
+            
+            # Initialize Docker resources (network and volumes) if they don't exist
+            echo "Initializing Docker resources..."
+            
+            # Create network if it doesn't exist
+            if ! docker network ls | grep -q "virtual-assistant-network"; then
+              echo "Creating virtual-assistant-network..."
+              docker network create virtual-assistant-network || true
+            fi
+            
+            # Create shared SQLite database volume if it doesn't exist
+            if ! docker volume inspect shared_sqlite_db >/dev/null 2>&1; then
+              echo "Creating shared_sqlite_db volume..."
+              docker volume create shared_sqlite_db || true
+            fi
+            
+            # Create shared Redis data volume if it doesn't exist
+            if ! docker volume inspect shared_redis_data >/dev/null 2>&1; then
+              echo "Creating shared_redis_data volume..."
+              docker volume create shared_redis_data || true
+            fi
+            
+            # Navigate to cursor-agents directory
             cd cursor-agents || { echo "Directory cursor-agents not found"; exit 1; }
+            
+            # Update code
             git fetch origin || { echo "Git fetch failed"; exit 1; }
             BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
             git reset --hard origin/$BRANCH || { echo "Git reset failed"; exit 1; }
+            
+            # Build and deploy
             docker compose build cursor-agents || { echo "Docker build failed"; exit 1; }
             docker compose up -d cursor-agents || { echo "Docker up failed"; exit 1; }
             echo "Deployment completed successfully"
