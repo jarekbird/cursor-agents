@@ -1,6 +1,6 @@
 import express, { Application, Request, Response } from 'express';
 import { createBullBoard } from '@bull-board/api';
-import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { QueueManager } from './queue/queue-manager.js';
 import { logger } from './logger.js';

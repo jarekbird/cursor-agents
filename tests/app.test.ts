@@ -11,7 +11,7 @@ jest.mock('@bull-board/api', () => ({
   createBullBoard: jest.fn(),
 }));
 
-jest.mock('@bull-board/api/bullMQAdapter.js', () => ({
+jest.mock('@bull-board/api/bullMQAdapter', () => ({
   BullMQAdapter: jest.fn(),
 }));
 
