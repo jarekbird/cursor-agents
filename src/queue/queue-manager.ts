@@ -126,7 +126,7 @@ export class QueueManager {
     logger.info('Recurring prompt added', {
       name,
       jobId: job.id,
-      schedule: repeatOptions.pattern || repeatOptions.cron,
+      schedule: repeatOptions.pattern || (repeatOptions as { cron?: string }).cron || 'unknown',
     });
 
     return { id: job.id!, name: job.name! };
@@ -155,7 +155,7 @@ export class QueueManager {
       isActive: true,
       lastRun: lastJob?.finishedOn ? new Date(lastJob.finishedOn) : undefined,
       nextRun: job.next ? new Date(job.next) : undefined,
-      jobId: job.id,
+      jobId: job.id || undefined,
     };
   }
 

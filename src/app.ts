@@ -15,7 +15,7 @@ export class CursorAgentsApp {
 
   private setupMiddleware(): void {
     this.app.use(express.json());
-    this.app.use((req, res, next) => {
+    this.app.use((req, _res, next) => {
       logger.info('HTTP Request', {
         method: req.method,
         path: req.path,
@@ -27,7 +27,7 @@ export class CursorAgentsApp {
 
   private setupRoutes(): void {
     // Health check endpoint
-    this.app.get('/health', (req: Request, res: Response) => {
+    this.app.get('/health', (_req: Request, res: Response) => {
       res.json({
         status: 'ok',
         service: 'cursor-agents',
@@ -36,7 +36,7 @@ export class CursorAgentsApp {
     });
 
     // Queue management endpoints
-    this.app.get('/queues', async (req: Request, res: Response) => {
+    this.app.get('/queues', async (_req: Request, res: Response) => {
       try {
         const queues = await this.queueManager.listQueues();
         res.json({ queues });
@@ -47,14 +47,15 @@ export class CursorAgentsApp {
     });
 
     // Add a recurring prompt
-    this.app.post('/prompts/recurring', async (req: Request, res: Response) => {
+    this.app.post('/prompts/recurring', async (req: Request, res: Response): Promise<void> => {
       try {
         const { name, prompt, schedule, options } = req.body;
 
         if (!name || !prompt || !schedule) {
-          return res.status(400).json({
+          res.status(400).json({
             error: 'Missing required fields: name, prompt, schedule',
           });
+          return;
         }
 
         const job = await this.queueManager.addRecurringPrompt({
@@ -76,13 +77,14 @@ export class CursorAgentsApp {
     });
 
     // Get prompt status
-    this.app.get('/prompts/:name', async (req: Request, res: Response) => {
+    this.app.get('/prompts/:name', async (req: Request, res: Response): Promise<void> => {
       try {
         const { name } = req.params;
         const status = await this.queueManager.getPromptStatus(name);
 
         if (!status) {
-          return res.status(404).json({ error: 'Prompt not found' });
+          res.status(404).json({ error: 'Prompt not found' });
+          return;
         }
 
         res.json(status);

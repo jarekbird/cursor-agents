@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # cursor-agents Node.js application service
   cursor-agents:
