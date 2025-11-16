@@ -68,9 +68,14 @@ export class DatabaseService {
   setSystemSetting(settingName: string, value: boolean): boolean {
     try {
       const db = this.getDatabase();
-      // Use INSERT OR REPLACE to handle both insert and update
+      // Use INSERT with ON CONFLICT to handle both insert and update
+      // This preserves created_at on updates and sets it on inserts
       const stmt = db.prepare(
-        'INSERT OR REPLACE INTO system_settings (name, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)'
+        `INSERT INTO system_settings (name, value, created_at, updated_at) 
+         VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT(name) DO UPDATE SET 
+           value = excluded.value,
+           updated_at = CURRENT_TIMESTAMP`
       );
       stmt.run(settingName, value ? 1 : 0);
       logger.info('System setting updated', { settingName, value });
