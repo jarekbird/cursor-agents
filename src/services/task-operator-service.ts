@@ -9,6 +9,12 @@ export class TaskOperatorService {
   private databaseService: DatabaseService;
   private readonly cursorRunnerUrl: string;
 
+  // Task status enum values (matching DatabaseService)
+  static readonly STATUS_READY = DatabaseService.STATUS_READY;
+  static readonly STATUS_COMPLETE = DatabaseService.STATUS_COMPLETE;
+  static readonly STATUS_ARCHIVED = DatabaseService.STATUS_ARCHIVED;
+  static readonly STATUS_BACKLOGGED = DatabaseService.STATUS_BACKLOGGED;
+
   constructor(databaseService?: DatabaseService) {
     this.databaseService = databaseService || new DatabaseService();
     this.cursorRunnerUrl = process.env.CURSOR_RUNNER_URL || 'http://cursor-runner:3001';
@@ -22,7 +28,7 @@ export class TaskOperatorService {
   }
 
   /**
-   * Process the next incomplete task
+   * Process the next ready task (status = 0)
    * Returns true if a task was processed, false if no tasks available
    */
   async processNextTask(): Promise<{ processed: boolean; taskId?: number; prompt?: string }> {
@@ -32,10 +38,10 @@ export class TaskOperatorService {
       return { processed: false };
     }
 
-    // Get next incomplete task
-    const task = this.databaseService.getNextIncompleteTask();
+    // Get next ready task (status = 0)
+    const task = this.databaseService.getNextReadyTask();
     if (!task) {
-      logger.info('No incomplete tasks found');
+      logger.info('No ready tasks found');
       return { processed: false };
     }
 
@@ -88,7 +94,14 @@ export class TaskOperatorService {
   }
 
   /**
-   * Mark a task as complete
+   * Update task status
+   */
+  updateTaskStatus(taskId: number, status: number): boolean {
+    return this.databaseService.updateTaskStatus(taskId, status);
+  }
+
+  /**
+   * Mark a task as complete (status = 1)
    */
   markTaskComplete(taskId: number): boolean {
     return this.databaseService.markTaskComplete(taskId);

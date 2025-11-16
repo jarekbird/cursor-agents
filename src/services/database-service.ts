@@ -86,20 +86,41 @@ export class DatabaseService {
   }
 
   /**
-   * Get the next incomplete task (lowest order)
+   * Task status enum values
+   * 0 = ready (ready to be processed)
+   * 1 = complete (task completed)
+   * 2 = archived (task archived)
+   * 3 = backlogged (task in backlog)
    */
-  getNextIncompleteTask(): { id: number; prompt: string; order: number; uuid: string } | null {
+  static readonly STATUS_READY = 0;
+  static readonly STATUS_COMPLETE = 1;
+  static readonly STATUS_ARCHIVED = 2;
+  static readonly STATUS_BACKLOGGED = 3;
+
+  /**
+   * Get the next ready task (lowest order)
+   * Only returns tasks with status = 0 (ready)
+   */
+  getNextReadyTask(): {
+    id: number;
+    prompt: string;
+    order: number;
+    uuid: string;
+    status: number;
+  } | null {
     try {
       const db = this.getDatabase();
       const row = db
         .prepare(
-          'SELECT id, prompt, "order", uuid FROM tasks WHERE complete = 0 ORDER BY "order" ASC, id ASC LIMIT 1'
+          'SELECT id, prompt, "order", uuid, status FROM tasks WHERE status = 0 ORDER BY "order" ASC, id ASC LIMIT 1'
         )
-        .get() as { id: number; prompt: string; order: number; uuid: string } | undefined;
+        .get() as
+        | { id: number; prompt: string; order: number; uuid: string; status: number }
+        | undefined;
 
       return row || null;
     } catch (error) {
-      logger.error('Failed to get next incomplete task', {
+      logger.error('Failed to get next ready task', {
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
@@ -107,20 +128,32 @@ export class DatabaseService {
   }
 
   /**
-   * Mark a task as complete
+   * Update task status
+   * @param taskId - Task ID
+   * @param status - New status (0=ready, 1=complete, 2=archived, 3=backlogged)
    */
-  markTaskComplete(taskId: number): boolean {
+  updateTaskStatus(taskId: number, status: number): boolean {
     try {
       const db = this.getDatabase();
-      const result = db.prepare('UPDATE tasks SET complete = 1 WHERE id = ?').run(taskId);
+      const result = db
+        .prepare('UPDATE tasks SET status = ?, updatedat = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(status, taskId);
       return result.changes > 0;
     } catch (error) {
-      logger.error('Failed to mark task as complete', {
+      logger.error('Failed to update task status', {
         taskId,
+        status,
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
     }
+  }
+
+  /**
+   * Mark a task as complete (status = 1)
+   */
+  markTaskComplete(taskId: number): boolean {
+    return this.updateTaskStatus(taskId, DatabaseService.STATUS_COMPLETE);
   }
 
   /**
