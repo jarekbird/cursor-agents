@@ -30,11 +30,15 @@ export class PromptProcessor {
 
   private async processAgentJob(data: AgentJobData): Promise<void> {
     const { targetUrl, method, headers = {}, body, timeout = 30000 } = data;
+    const startTime = Date.now();
 
-    logger.info('Processing agent job', {
+    // Log incoming request with full details
+    logger.info('Agent job request received', {
       targetUrl,
       method,
-      hasBody: !!body,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+      body: body ? (typeof body === 'string' ? body.substring(0, 500) : body) : undefined,
+      timeout,
     });
 
     try {
@@ -54,9 +58,18 @@ export class PromptProcessor {
         fetchOptions.body = JSON.stringify(body);
       }
 
+      logger.info('Sending HTTP request', {
+        targetUrl,
+        method,
+        hasBody: !!fetchOptions.body,
+        bodyLength:
+          fetchOptions.body && typeof fetchOptions.body === 'string' ? fetchOptions.body.length : 0,
+      });
+
       const response = await fetch(targetUrl, fetchOptions);
       clearTimeout(timeoutId);
 
+      const duration = Date.now() - startTime;
       const responseText = await response.text();
       let responseBody: unknown;
       try {
@@ -71,6 +84,7 @@ export class PromptProcessor {
           method,
           status: response.status,
           statusText: response.statusText,
+          duration: `${duration}ms`,
           response: responseBody,
         });
         throw new Error(
@@ -82,13 +96,16 @@ export class PromptProcessor {
         targetUrl,
         method,
         status: response.status,
+        duration: `${duration}ms`,
         response: responseBody,
       });
     } catch (error) {
+      const duration = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error('Agent job failed', {
         targetUrl,
         method,
+        duration: `${duration}ms`,
         error: errorMessage,
       });
       throw error;
