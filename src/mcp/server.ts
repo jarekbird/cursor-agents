@@ -73,7 +73,8 @@ export class MCPServer {
         },
       },
       async (args) => {
-        logger.info('MCP tool called', {
+        // Log to both Winston logger (for structured logs) and stderr (for visibility)
+        const logData = {
           tool: 'create_agent',
           args: {
             name: args.name,
@@ -84,10 +85,13 @@ export class MCPServer {
             oneTime: args.oneTime,
             timeout: args.timeout,
           },
-        });
+        };
+        logger.info('MCP tool called', logData);
+        process.stderr.write(`[MCP] tool called: create_agent ${JSON.stringify(logData)}\n`);
         try {
           const result = await this.handleCreateAgent(args);
           logger.info('MCP tool completed', { tool: 'create_agent', success: !result.isError });
+          process.stderr.write(`[MCP] tool completed: create_agent success=${!result.isError}\n`);
           return result;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -115,9 +119,11 @@ export class MCPServer {
       },
       async () => {
         logger.info('MCP tool called', { tool: 'list_agents' });
+        process.stderr.write(`[MCP] tool called: list_agents\n`);
         try {
           const result = await this.handleListAgents();
           logger.info('MCP tool completed', { tool: 'list_agents', success: !result.isError });
+          process.stderr.write(`[MCP] tool completed: list_agents success=${!result.isError}\n`);
           return result;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -147,9 +153,13 @@ export class MCPServer {
       },
       async (args) => {
         logger.info('MCP tool called', { tool: 'get_agent_status', args: { name: args.name } });
+        process.stderr.write(`[MCP] tool called: get_agent_status name=${args.name}\n`);
         try {
           const result = await this.handleGetAgentStatus(args);
           logger.info('MCP tool completed', { tool: 'get_agent_status', success: !result.isError });
+          process.stderr.write(
+            `[MCP] tool completed: get_agent_status success=${!result.isError}\n`
+          );
           return result;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -179,9 +189,11 @@ export class MCPServer {
       },
       async (args) => {
         logger.info('MCP tool called', { tool: 'delete_agent', args: { name: args.name } });
+        process.stderr.write(`[MCP] tool called: delete_agent name=${args.name}\n`);
         try {
           const result = await this.handleDeleteAgent(args);
           logger.info('MCP tool completed', { tool: 'delete_agent', success: !result.isError });
+          process.stderr.write(`[MCP] tool completed: delete_agent success=${!result.isError}\n`);
           return result;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
