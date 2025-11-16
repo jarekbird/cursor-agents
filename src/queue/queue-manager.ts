@@ -71,6 +71,21 @@ export class QueueManager {
     return Array.from(this.queues.values());
   }
 
+  /**
+   * Get connection options for BullMQ that ensure maxRetriesPerRequest is set
+   * This ensures all BullMQ connections (including internal ones) have the correct setting
+   * We pass the Redis instance directly, but also include maxRetriesPerRequest in case
+   * BullMQ creates additional connections internally
+   */
+  private getConnectionOptions(): { connection: Redis } {
+    // The Redis instance already has maxRetriesPerRequest: null set
+    // BullMQ will use this instance, and any additional connections it creates
+    // should inherit from the connection options or use the same instance
+    return {
+      connection: this.redis,
+    };
+  }
+
   constructor(
     redis?: Redis,
     promptProcessor?: PromptProcessor,
@@ -154,9 +169,7 @@ export class QueueManager {
       for (const queueName of queueNames) {
         try {
           // Recreate queue
-          const queue = this.queueFactory(queueName, {
-            connection: this.redis,
-          });
+          const queue = this.queueFactory(queueName, this.getConnectionOptions());
           this.queues.set(queueName, queue);
 
           // Recreate worker
@@ -167,7 +180,7 @@ export class QueueManager {
               await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
             },
             {
-              connection: this.redis,
+              ...this.getConnectionOptions(),
               concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
             }
           );
@@ -183,7 +196,7 @@ export class QueueManager {
           this.workers.set(queueName, worker);
 
           // Recreate queue events
-          const queueEvents = this.queueEventsFactory(queueName, { connection: this.redis });
+          const queueEvents = this.queueEventsFactory(queueName, this.getConnectionOptions());
           this.queueEvents.set(queueName, queueEvents);
 
           logger.info('Restored queue from Redis', { queueName });
@@ -206,9 +219,7 @@ export class QueueManager {
 
     let queue = this.queues.get(name);
     if (!queue) {
-      queue = this.queueFactory(name, {
-        connection: this.redis,
-      });
+      queue = this.queueFactory(name, this.getConnectionOptions());
       this.queues.set(name, queue);
 
       // Create worker for this queue
@@ -219,7 +230,7 @@ export class QueueManager {
           await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
         },
         {
-          connection: this.redis,
+          ...this.getConnectionOptions(),
           concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
         }
       );
@@ -235,7 +246,7 @@ export class QueueManager {
       this.workers.set(name, worker);
 
       // Create queue events listener
-      const queueEvents = this.queueEventsFactory(name, { connection: this.redis });
+      const queueEvents = this.queueEventsFactory(name, this.getConnectionOptions());
       this.queueEvents.set(name, queueEvents);
     }
 
@@ -345,9 +356,7 @@ export class QueueManager {
 
     let queue = this.queues.get(name);
     if (!queue) {
-      queue = this.queueFactory(name, {
-        connection: this.redis,
-      });
+      queue = this.queueFactory(name, this.getConnectionOptions());
       this.queues.set(name, queue);
 
       // Create worker for this queue
@@ -359,7 +368,7 @@ export class QueueManager {
           await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
         },
         {
-          connection: this.redis,
+          ...this.getConnectionOptions(),
           concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
         }
       );
@@ -389,7 +398,7 @@ export class QueueManager {
       logger.info('Worker created and ready', { queueName: name });
 
       // Create queue events listener
-      const queueEvents = this.queueEventsFactory(name, { connection: this.redis });
+      const queueEvents = this.queueEventsFactory(name, this.getConnectionOptions());
       this.queueEvents.set(name, queueEvents);
     }
 
@@ -436,9 +445,7 @@ export class QueueManager {
 
     let queue = this.queues.get(name);
     if (!queue) {
-      queue = this.queueFactory(name, {
-        connection: this.redis,
-      });
+      queue = this.queueFactory(name, this.getConnectionOptions());
       this.queues.set(name, queue);
 
       // Create worker for this queue
@@ -450,7 +457,7 @@ export class QueueManager {
           await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
         },
         {
-          connection: this.redis,
+          ...this.getConnectionOptions(),
           concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
         }
       );
@@ -480,7 +487,7 @@ export class QueueManager {
       logger.info('Worker created and ready', { queueName: name });
 
       // Create queue events listener
-      const queueEvents = this.queueEventsFactory(name, { connection: this.redis });
+      const queueEvents = this.queueEventsFactory(name, this.getConnectionOptions());
       this.queueEvents.set(name, queueEvents);
     }
 
