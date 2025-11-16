@@ -43,8 +43,25 @@ jobs:
               docker volume create shared_redis_data || true
             fi
             
+            # Create cursor_runner_repositories volume if it doesn't exist
+            if ! docker volume inspect cursor_runner_repositories >/dev/null 2>&1; then
+              echo "Creating cursor_runner_repositories volume..."
+              docker volume create cursor_runner_repositories || true
+            fi
+            
             # Navigate to cursor-agents directory
-            cd cursor-agents || { echo "Directory cursor-agents not found"; exit 1; }
+            # Try multiple possible locations
+            if [ -d "cursor-agents" ]; then
+              cd cursor-agents
+            elif [ -d "$HOME/cursor-agents" ]; then
+              cd $HOME/cursor-agents
+            elif [ -d "/opt/cursor-agents" ]; then
+              cd /opt/cursor-agents
+            else
+              echo "Error: cursor-agents directory not found in expected locations"
+              echo "Tried: cursor-agents, $HOME/cursor-agents, /opt/cursor-agents"
+              exit 1
+            fi
             
             # Update code
             git fetch origin || { echo "Git fetch failed"; exit 1; }
@@ -64,8 +81,15 @@ jobs:
             echo "Using DOMAIN_NAME: $DOMAIN_NAME"
             
             # Build and deploy
-            docker compose build cursor-agents || { echo "Docker build failed"; exit 1; }
-            DOMAIN_NAME=$DOMAIN_NAME docker compose up -d cursor-agents || { echo "Docker up failed"; exit 1; }
+            # Use docker-compose (with hyphen) for compatibility, or docker compose (with space) if available
+            if command -v docker-compose &> /dev/null; then
+              COMPOSE_CMD="docker-compose"
+            else
+              COMPOSE_CMD="docker compose"
+            fi
+            
+            $COMPOSE_CMD build cursor-agents || { echo "Docker build failed"; exit 1; }
+            DOMAIN_NAME=$DOMAIN_NAME $COMPOSE_CMD up -d cursor-agents || { echo "Docker up failed"; exit 1; }
             echo "Deployment completed successfully"
           script_stop: true
           debug: true
