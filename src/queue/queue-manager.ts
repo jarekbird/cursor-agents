@@ -79,7 +79,11 @@ export class QueueManager {
     queueEventsFactory?: QueueEventsFactory
   ) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379/0';
-    this.redis = redis || new Redis(redisUrl);
+    this.redis =
+      redis ||
+      new Redis(redisUrl, {
+        maxRetriesPerRequest: null, // Required by BullMQ - BullMQ manages its own retry logic
+      });
     this.promptProcessor = promptProcessor || new PromptProcessor();
 
     // Use provided factories or default to actual BullMQ classes
