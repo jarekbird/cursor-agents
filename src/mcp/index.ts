@@ -31,7 +31,13 @@ async function main(): Promise<void> {
     // Start MCP server
     logToStderr('cursor-agents MCP server: Starting MCP server transport...');
     await mcpServer.start();
+
+    // Log that resources should be available
+    // The McpServer automatically advertises resources capability when resources are registered
     logToStderr('cursor-agents MCP server: MCP server started and ready for connections');
+    logToStderr(
+      'cursor-agents MCP server: Resources should be available via resources/list request'
+    );
 
     // Also log via winston (for file logs if configured)
     logger.info('MCP server started and ready for connections');

@@ -178,11 +178,13 @@ export class MCPServer {
 
     // Register agent resources dynamically
     // Use ResourceTemplate with a list function to provide all available agents
+    logger.info('Registering agent resources...');
     this.server.registerResource(
       'agent',
       new ResourceTemplate('agent://{name}', {
         list: async (_extra) => {
           const queues = await this.queueManager.listQueues();
+          logger.info('Listing agent resources', { queueCount: queues.length });
           return {
             resources: queues.map((name) => ({
               uri: `agent://${name}`,
@@ -200,6 +202,7 @@ export class MCPServer {
       },
       async (uri, params) => {
         const name = typeof params.name === 'string' ? params.name : params.name[0];
+        logger.info('Reading agent resource', { uri: uri.href, name });
         const status = await this.queueManager.getAgentStatus(name);
 
         if (!status) {
@@ -217,6 +220,7 @@ export class MCPServer {
         };
       }
     );
+    logger.info('Agent resources registered successfully');
   }
 
   private async handleCreateAgent(args: unknown): Promise<{
