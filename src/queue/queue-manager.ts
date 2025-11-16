@@ -114,9 +114,91 @@ export class QueueManager {
   }
 
   private async loadExistingQueues(): Promise<void> {
-    // This would load existing recurring jobs from Redis
-    // For now, we'll start fresh on each initialization
+    // Load existing queues from Redis
+    // BullMQ stores queue metadata with keys like "bull:{queueName}:meta"
     logger.info('Loading existing queues...');
+
+    try {
+      // Scan Redis for all BullMQ queue keys
+      // BullMQ uses keys like "bull:{queueName}:meta", "bull:{queueName}:id", etc.
+      const keys: string[] = [];
+      let cursor = '0';
+
+      do {
+        const [nextCursor, foundKeys] = await this.redis.scan(
+          cursor,
+          'MATCH',
+          'bull:*:meta',
+          'COUNT',
+          100
+        );
+        cursor = nextCursor;
+        keys.push(...foundKeys);
+      } while (cursor !== '0');
+
+      // Extract queue names from keys (format: "bull:{queueName}:meta")
+      const queueNames = new Set<string>();
+      for (const key of keys) {
+        const match = key.match(/^bull:([^:]+):meta$/);
+        if (match) {
+          queueNames.add(match[1]);
+        }
+      }
+
+      logger.info('Found existing queues in Redis', {
+        count: queueNames.size,
+        queues: Array.from(queueNames),
+      });
+
+      // Recreate queues, workers, and queue events for each existing queue
+      for (const queueName of queueNames) {
+        try {
+          // Recreate queue
+          const queue = this.queueFactory(queueName, {
+            connection: this.redis,
+          });
+          this.queues.set(queueName, queue);
+
+          // Recreate worker
+          const worker = this.workerFactory(
+            queueName,
+            async (job) => {
+              logger.info('Processing agent job', { jobId: job.id, name: job.name });
+              await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
+            },
+            {
+              connection: this.redis,
+              concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
+            }
+          );
+
+          worker.on('completed', (job) => {
+            logger.info('Agent job completed', { jobId: job.id, name: job.name });
+          });
+
+          worker.on('failed', (job, err) => {
+            logger.error('Agent job failed', { jobId: job?.id, name: job?.name, error: err });
+          });
+
+          this.workers.set(queueName, worker);
+
+          // Recreate queue events
+          const queueEvents = this.queueEventsFactory(queueName, { connection: this.redis });
+          this.queueEvents.set(queueName, queueEvents);
+
+          logger.info('Restored queue from Redis', { queueName });
+        } catch (error) {
+          logger.error('Failed to restore queue from Redis', { queueName, error });
+          // Continue with other queues even if one fails
+        }
+      }
+
+      logger.info('Finished loading existing queues', { restoredCount: this.queues.size });
+    } catch (error) {
+      logger.error('Error loading existing queues from Redis', { error });
+      // Don't throw - allow application to start even if queue loading fails
+      // Queues will be created on-demand when new agents are added
+    }
   }
 
   async addRecurringPrompt(options: RecurringPromptOptions): Promise<{ id: string; name: string }> {
