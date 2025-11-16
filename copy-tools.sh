@@ -21,23 +21,24 @@ echo "Source: /app/tools (inside container)"
 echo "Destination: /cursor/tools/cursor-agents/ (on shared volume)"
 
 # Execute the copy command inside the container
-docker exec cursor-agents sh -c '
-  if [ -d "/cursor" ]; then
-    echo "✓ /cursor volume is mounted"
+# Use a simpler approach with proper escaping
+docker exec cursor-agents sh -c "
+  if [ -d \"/cursor\" ]; then
+    echo \"✓ /cursor volume is mounted\"
     
     # Verify source directory exists
-    if [ ! -d "/app/tools" ]; then
-      echo "ERROR: /app/tools directory does not exist in container!"
+    if [ ! -d \"/app/tools\" ]; then
+      echo \"ERROR: /app/tools directory does not exist in container!\"
       exit 1
     fi
     
-    if [ -z "$(ls -A /app/tools)" ]; then
-      echo "ERROR: /app/tools directory is empty!"
+    if [ -z \"\$(ls -A /app/tools)\" ]; then
+      echo \"ERROR: /app/tools directory is empty!\"
       exit 1
     fi
     
-    echo "Source tools found: $(ls -1 /app/tools | wc -l) files"
-    echo "Files: $(ls -1 /app/tools | tr '\n' ' ')"
+    FILE_COUNT=\$(ls -1 /app/tools | wc -l)
+    echo \"Source tools found: \$FILE_COUNT files\"
     
     # Remove existing tools directory to ensure clean copy
     rm -rf /cursor/tools/cursor-agents
@@ -52,20 +53,20 @@ docker exec cursor-agents sh -c '
     chmod +x /cursor/tools/cursor-agents/*.py 2>/dev/null || true
     
     # Verify copy was successful
-    if [ -z "$(ls -A /cursor/tools/cursor-agents)" ]; then
-      echo "ERROR: Tools copy failed - destination directory is empty!"
+    if [ -z \"\$(ls -A /cursor/tools/cursor-agents)\" ]; then
+      echo \"ERROR: Tools copy failed - destination directory is empty!\"
       exit 1
     fi
     
-    echo ""
-    echo "✓ Tools copied successfully to /cursor/tools/cursor-agents/"
-    echo "Copied files: $(ls -1 /cursor/tools/cursor-agents | wc -l) files"
-    echo "Files: $(ls -1 /cursor/tools/cursor-agents | tr '\n' ' ')"
+    echo \"\"
+    echo \"✓ Tools copied successfully to /cursor/tools/cursor-agents/\"
+    COPIED_COUNT=\$(ls -1 /cursor/tools/cursor-agents | wc -l)
+    echo \"Copied files: \$COPIED_COUNT files\"
   else
-    echo "ERROR: /cursor volume is not mounted in container!"
+    echo \"ERROR: /cursor volume is not mounted in container!\"
     exit 1
   fi
-'
+"
 
 if [ $? -eq 0 ]; then
   echo ""
