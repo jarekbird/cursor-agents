@@ -3,16 +3,19 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { QueueManager } from './queue/queue-manager.js';
+import { DatabaseService } from './services/database-service.js';
 import { logger } from './logger.js';
 
 export class CursorAgentsApp {
   public app: Application;
   private queueManager: QueueManager;
+  private databaseService: DatabaseService;
   private serverAdapter!: ExpressAdapter;
 
-  constructor(queueManager?: QueueManager) {
+  constructor(queueManager?: QueueManager, databaseService?: DatabaseService) {
     this.app = express();
     this.queueManager = queueManager || new QueueManager();
+    this.databaseService = databaseService || new DatabaseService();
     this.setupMiddleware();
     this.setupRoutes();
   }
@@ -276,6 +279,95 @@ export class CursorAgentsApp {
       } catch (error) {
         logger.error('Failed to delete agent', { error, name: req.params.name });
         res.status(500).json({ error: 'Failed to delete agent' });
+      }
+    });
+
+    // Task operator endpoints
+    // Create/enqueue task operator agent
+    this.app.post('/task-operator', async (req: Request, res: Response): Promise<void> => {
+      try {
+        const { queue } = req.body;
+        const agentName = 'task-operator';
+        const targetQueue = queue || 'task-operator';
+
+        // Enable task_operator system setting
+        const settingSuccess = this.databaseService.setSystemSetting('task_operator', true);
+        if (!settingSuccess) {
+          logger.warn(
+            'Failed to enable task_operator system setting, but continuing with agent creation'
+          );
+        }
+
+        // Enqueue a one-time task operator job
+        const job = await this.queueManager.addOneTimeAgent({
+          name: agentName,
+          targetUrl: 'task-operator://internal',
+          method: 'POST',
+          body: {
+            type: 'task_operator',
+            agentName,
+            queue: targetQueue,
+          },
+          queue: targetQueue,
+          timeout: 30000,
+        });
+
+        logger.info('Task operator agent enqueued', {
+          agentName,
+          queue: targetQueue,
+          jobId: job.id,
+          settingEnabled: settingSuccess,
+        });
+
+        res.json({
+          success: true,
+          message: 'Task operator agent enqueued successfully',
+          agent: {
+            name: job.name,
+            jobId: job.id,
+            queue: targetQueue,
+          },
+        });
+      } catch (error) {
+        logger.error('Failed to enqueue task operator', { error });
+        res.status(500).json({ error: 'Failed to enqueue task operator' });
+      }
+    });
+
+    // Delete/disable task operator (sets system setting to false)
+    this.app.delete('/task-operator', async (_req: Request, res: Response): Promise<void> => {
+      try {
+        // Set task_operator system setting to false
+        const success = this.databaseService.setSystemSetting('task_operator', false);
+
+        if (!success) {
+          res.status(500).json({
+            error: 'Failed to disable task operator',
+          });
+          return;
+        }
+
+        // Also try to remove any existing task operator agents
+        try {
+          await this.queueManager.removeAgent('task-operator');
+        } catch (error) {
+          // Ignore errors if agent doesn't exist
+          logger.info('Task operator agent not found (may already be removed)', { error });
+        }
+
+        logger.info('Task operator disabled', {
+          setting: 'task_operator',
+          value: false,
+        });
+
+        res.json({
+          success: true,
+          message:
+            'Task operator disabled successfully. It will stop re-enqueueing after current jobs complete.',
+        });
+      } catch (error) {
+        logger.error('Failed to disable task operator', { error });
+        res.status(500).json({ error: 'Failed to disable task operator' });
       }
     });
   }

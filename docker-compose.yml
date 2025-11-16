@@ -23,6 +23,8 @@ services:
       # Tool scripts should be placed in /cursor/tools (one script per tool)
       # One-time scripts created by cursor-cli are placed in /cursor/scripts
       - cursor_runner_repositories:/cursor
+      # Mount shared SQLite database for accessing system settings and tasks
+      - shared_sqlite_db:/app/shared_db
     networks:
       - virtual-assistant-network
     # Note: Redis and Traefik services are defined in jarek-va/docker-compose.yml
@@ -57,6 +59,10 @@ volumes:
   cursor_runner_repositories:
     external: true
     name: cursor_runner_repositories
+  # Reference the shared SQLite database volume
+  shared_sqlite_db:
+    external: true
+    name: shared_sqlite_db
 
 networks:
   virtual-assistant-network:

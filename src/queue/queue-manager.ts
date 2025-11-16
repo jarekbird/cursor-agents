@@ -104,7 +104,7 @@ export class QueueManager {
       new Redis(redisUrl, {
         maxRetriesPerRequest: null, // Required by BullMQ - BullMQ manages its own retry logic
       });
-    this.promptProcessor = promptProcessor || new PromptProcessor();
+    this.promptProcessor = promptProcessor || new PromptProcessor(this);
 
     // Use provided factories or default to actual BullMQ classes
     this.queueFactory = queueFactory || ((name, options) => new Queue(name, options));
@@ -411,9 +411,12 @@ export class QueueManager {
   }
 
   /**
-   * Add a one-time agent that executes immediately
+   * Add a one-time agent that executes immediately or after a delay
    */
-  async addOneTimeAgent(config: AgentConfig): Promise<{ id: string; name: string }> {
+  async addOneTimeAgent(
+    config: AgentConfig,
+    delay?: number
+  ): Promise<{ id: string; name: string }> {
     const {
       name,
       targetUrl,
@@ -436,9 +439,15 @@ export class QueueManager {
       timeout,
     };
 
-    const job = await queueInstance.add(name, jobData, {
+    const jobOptions: { jobId: string; delay?: number } = {
       jobId: `agent:${name}:${Date.now()}`,
-    });
+    };
+
+    if (delay && delay > 0) {
+      jobOptions.delay = delay;
+    }
+
+    const job = await queueInstance.add(name, jobData, jobOptions);
 
     logger.info('One-time agent added', {
       name,
@@ -446,6 +455,7 @@ export class QueueManager {
       jobId: job.id,
       targetUrl,
       method,
+      delay: delay ? `${delay}ms` : undefined,
     });
 
     return { id: job.id!, name: job.name! };

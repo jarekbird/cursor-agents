@@ -1,4 +1,6 @@
 import { logger } from '../logger.js';
+import { TaskOperatorService } from '../services/task-operator-service.js';
+import type { QueueManager } from './queue-manager.js';
 
 export interface PromptJobData {
   prompt: string;
@@ -19,12 +21,31 @@ export interface AgentJobData {
   timeout?: number;
 }
 
+// Special job type for task operator
+export interface TaskOperatorJobData {
+  type: 'task_operator';
+  agentName: string;
+  queue?: string;
+}
+
 export class PromptProcessor {
-  async process(data: PromptJobData | AgentJobData): Promise<void> {
-    // Check if this is an agent job (HTTP request) or a prompt job
-    if ('targetUrl' in data) {
+  private queueManager?: QueueManager;
+  private taskOperatorService: TaskOperatorService;
+
+  constructor(queueManager?: QueueManager) {
+    this.queueManager = queueManager;
+    this.taskOperatorService = new TaskOperatorService();
+  }
+
+  async process(data: PromptJobData | AgentJobData | TaskOperatorJobData): Promise<void> {
+    // Check if this is a task operator job
+    if ('type' in data && data.type === 'task_operator') {
+      await this.processTaskOperatorJob(data as TaskOperatorJobData);
+    } else if ('targetUrl' in data) {
+      // Agent job (HTTP request)
       await this.processAgentJob(data as AgentJobData);
     } else {
+      // Prompt job
       await this.processPromptJob(data as PromptJobData);
     }
   }
@@ -32,6 +53,16 @@ export class PromptProcessor {
   private async processAgentJob(data: AgentJobData): Promise<void> {
     const { agentName, targetUrl, method, headers = {}, body, timeout = 30000 } = data;
     const startTime = Date.now();
+
+    // Check if this is a task operator internal job
+    if (targetUrl === 'task-operator://internal') {
+      // Extract task operator job data from body
+      if (body && typeof body === 'object' && 'type' in body && body.type === 'task_operator') {
+        const taskOperatorData = body as TaskOperatorJobData;
+        await this.processTaskOperatorJob(taskOperatorData);
+        return;
+      }
+    }
 
     // Log incoming request with full details
     logger.info('Agent job request received', {
@@ -126,6 +157,7 @@ export class PromptProcessor {
     const cursorRunnerUrl = process.env.CURSOR_RUNNER_URL || 'http://cursor-runner:3001';
 
     try {
+      // Use synchronous endpoint since we're already in an async worker context
       const response = await fetch(`${cursorRunnerUrl}/cursor/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -151,6 +183,65 @@ export class PromptProcessor {
       logger.info('Prompt processed (logged only)', {
         prompt: prompt.substring(0, 100) + '...',
       });
+    }
+  }
+
+  /**
+   * Process task operator job
+   * Checks system setting, processes next task, and re-enqueues if enabled
+   */
+  private async processTaskOperatorJob(data: TaskOperatorJobData): Promise<void> {
+    const { agentName, queue } = data;
+
+    logger.info('Task operator job started', { agentName });
+
+    // Check if task operator is enabled at the start
+    if (!this.taskOperatorService.isTaskOperatorEnabled()) {
+      logger.info('Task operator is disabled, stopping immediately', { agentName });
+      return;
+    }
+
+    // Process the next task
+    const result = await this.taskOperatorService.processNextTask();
+
+    if (result.processed && result.taskId) {
+      logger.info('Task processed by task operator', {
+        agentName,
+        taskId: result.taskId,
+      });
+    } else {
+      logger.info('No tasks to process', { agentName });
+    }
+
+    // CRITICAL: Check the system setting again before re-enqueueing
+    // This ensures that if the setting was changed to false during processing,
+    // we will stop re-enqueueing
+    const isStillEnabled = this.taskOperatorService.isTaskOperatorEnabled();
+
+    if (!isStillEnabled) {
+      logger.info('Task operator setting is now false, stopping re-enqueueing', { agentName });
+      return;
+    }
+
+    // Only re-enqueue if still enabled and queue manager is available
+    if (this.queueManager) {
+      const delay = 5000; // 5 second delay before checking again
+      logger.info('Re-enqueueing task operator', { agentName, delay: `${delay}ms` });
+
+      // Add a delayed one-time job to re-enqueue the task operator
+      await this.queueManager.addOneTimeAgent(
+        {
+          name: agentName,
+          targetUrl: `task-operator://internal`, // Special URL to identify task operator
+          method: 'POST',
+          body: { type: 'task_operator', agentName, queue },
+          queue: queue || 'task-operator',
+          timeout: 30000,
+        },
+        delay
+      );
+    } else {
+      logger.warn('Queue manager not available, cannot re-enqueue task operator', { agentName });
     }
   }
 }

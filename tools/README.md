@@ -33,7 +33,7 @@ python create_agent.py --name "daily-check" --target-url "http://api.example.com
     --schedule "0 0 * * *" --method GET
 
 # Create an agent in a specific queue
-python create_agent.py --name "daily-note" --target-url "http://cursor-runner:3001/cursor/iterate" \
+python create_agent.py --name "daily-note" --target-url "http://cursor-runner:3001/cursor/iterate/async" \
     --schedule "0 8 * * *" --queue "daily-tasks" \
     --body '{"prompt": "create todays daily note in the obsidian repository"}'
 ```
@@ -108,6 +108,55 @@ python delete_queue.py --queue-name <queue-name>
 
 **Output:**
 Returns a success message if the queue was deleted, or an error if it cannot be deleted.
+
+### enable_task_operator.py
+Enables the task operator agent, which automatically processes tasks from the database.
+The task operator will continuously check for incomplete tasks and send them to cursor-runner
+until disabled.
+
+**Usage:**
+```bash
+python enable_task_operator.py [--queue <queue-name>]
+```
+
+**Options:**
+- `--queue, -q`: Queue name to use for the task operator (default: "task-operator")
+
+**Examples:**
+```bash
+# Enable task operator with default queue
+python enable_task_operator.py
+
+# Enable task operator in a specific queue
+python enable_task_operator.py --queue "task-processing"
+```
+
+**How it works:**
+1. Sets the `task_operator` system setting to `true` in the database
+2. Enqueues a task operator agent job
+3. The agent will check for incomplete tasks (lowest order first)
+4. Sends task prompts to cursor-runner for processing
+5. Automatically re-enqueues itself every 5 seconds if still enabled
+
+### disable_task_operator.py
+Disables the task operator agent by setting the system setting to false.
+The task operator will stop re-enqueueing itself after current jobs complete.
+
+**Usage:**
+```bash
+python disable_task_operator.py
+```
+
+**Examples:**
+```bash
+# Disable task operator
+python disable_task_operator.py
+```
+
+**How it works:**
+1. Sets the `task_operator` system setting to `false` in the database
+2. Removes any existing task operator agents
+3. The task operator will stop re-enqueueing after processing current tasks
 
 ## Queue Management
 
