@@ -1,46 +1,52 @@
 #!/usr/bin/env python3
 """
-List Agents Tool
+List Queues Tool
 
-Lists all active agents in the cursor-agents system.
+Lists all available queues in the cursor-agents system with their statistics.
 
 Usage:
-    python list_agents.py
+    python list_queues.py
 
-This tool has no arguments. It simply lists all active agents and their status.
+This tool has no arguments. It lists all queues and their information.
 
 Output:
-    Returns a JSON array of agent objects, each containing:
-    - name: Agent name
-    - isActive: Whether the agent is currently active
-    - lastRun: Last execution time (if available)
-    - nextRun: Next scheduled execution time (if available)
-    - targetUrl: Target URL for the agent
-    - method: HTTP method used
-    - schedule: Cron pattern or interval (for recurring agents)
-    - timeout: Request timeout in milliseconds
-    - queue: Queue name where the agent is located
+    Returns a JSON object containing an array of queue objects, each containing:
+    - name: Queue name
+    - waiting: Number of waiting jobs
+    - active: Number of active jobs
+    - completed: Number of completed jobs
+    - failed: Number of failed jobs
+    - delayed: Number of delayed jobs
+    - agents: Array of agent names in this queue
 
 Example Output:
     {
-      "agents": [
+      "queues": [
         {
-          "name": "daily-check",
-          "isActive": true,
-          "lastRun": "2024-01-15T10:00:00Z",
-          "nextRun": "2024-01-16T10:00:00Z",
-          "targetUrl": "http://api.example.com/check",
-          "method": "GET",
-          "schedule": "0 0 * * *",
-          "timeout": 30000
+          "name": "default",
+          "waiting": 0,
+          "active": 1,
+          "completed": 5,
+          "failed": 0,
+          "delayed": 2,
+          "agents": ["daily-check", "hourly-sync"]
+        },
+        {
+          "name": "daily-tasks",
+          "waiting": 0,
+          "active": 0,
+          "completed": 10,
+          "failed": 0,
+          "delayed": 1,
+          "agents": ["daily-note"]
         }
       ]
     }
 
 Note:
     This script outputs the expected format.
-    To actually list agents, you would need to:
-    1. Use the cursor-agents MCP server's list_agents tool
+    To actually list queues, you would need to:
+    1. Use the cursor-agents MCP server's list_queues tool
     2. Or make an HTTP request to the cursor-agents API
 """
 
@@ -73,9 +79,9 @@ def main():
     """Main entry point."""
     # Get API URL from environment or use default
     api_url = os.getenv('CURSOR_AGENTS_URL', 'http://cursor-agents:3002')
-    url = f"{api_url}/agents"
+    url = f"{api_url}/queues"
     
-    # Make HTTP request to list agents
+    # Make HTTP request to list queues
     result = make_request(url)
     
     if 'error' in result:

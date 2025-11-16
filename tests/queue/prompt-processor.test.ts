@@ -16,6 +16,7 @@ describe('PromptProcessor', () => {
   describe('processAgentJob', () => {
     it('should make GET request successfully', async () => {
       const jobData: AgentJobData = {
+        agentName: 'test-agent',
         targetUrl: 'http://example.com/api',
         method: 'GET',
         timeout: 5000,
@@ -41,6 +42,7 @@ describe('PromptProcessor', () => {
 
     it('should make POST request with body', async () => {
       const jobData: AgentJobData = {
+        agentName: 'test-agent',
         targetUrl: 'http://example.com/api',
         method: 'POST',
         body: { key: 'value' },
@@ -70,6 +72,7 @@ describe('PromptProcessor', () => {
 
     it('should handle HTTP errors', async () => {
       const jobData: AgentJobData = {
+        agentName: 'test-agent',
         targetUrl: 'http://example.com/api',
         method: 'GET',
         timeout: 5000,
@@ -87,6 +90,7 @@ describe('PromptProcessor', () => {
 
     it('should handle network errors', async () => {
       const jobData: AgentJobData = {
+        agentName: 'test-agent',
         targetUrl: 'http://example.com/api',
         method: 'GET',
         timeout: 5000,
@@ -99,6 +103,7 @@ describe('PromptProcessor', () => {
 
     it('should handle timeout', async () => {
       const jobData: AgentJobData = {
+        agentName: 'test-agent',
         targetUrl: 'http://example.com/api',
         method: 'GET',
         timeout: 100,
@@ -122,6 +127,7 @@ describe('PromptProcessor', () => {
 
     it('should parse JSON response', async () => {
       const jobData: AgentJobData = {
+        agentName: 'test-agent',
         targetUrl: 'http://example.com/api',
         method: 'GET',
         timeout: 5000,
@@ -141,6 +147,7 @@ describe('PromptProcessor', () => {
 
     it('should handle non-JSON response', async () => {
       const jobData: AgentJobData = {
+        agentName: 'test-agent',
         targetUrl: 'http://example.com/api',
         method: 'GET',
         timeout: 5000,

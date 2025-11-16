@@ -11,6 +11,7 @@ export interface PromptJobData {
 }
 
 export interface AgentJobData {
+  agentName: string; // Track which agent this job belongs to
   targetUrl: string;
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   headers?: Record<string, string>;
@@ -29,11 +30,12 @@ export class PromptProcessor {
   }
 
   private async processAgentJob(data: AgentJobData): Promise<void> {
-    const { targetUrl, method, headers = {}, body, timeout = 30000 } = data;
+    const { agentName, targetUrl, method, headers = {}, body, timeout = 30000 } = data;
     const startTime = Date.now();
 
     // Log incoming request with full details
     logger.info('Agent job request received', {
+      agentName,
       targetUrl,
       method,
       headers: Object.keys(headers).length > 0 ? headers : undefined,

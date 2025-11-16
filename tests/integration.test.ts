@@ -62,6 +62,7 @@ describe('Integration Tests', () => {
       removeRecurringPrompt: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       removeAgent: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       getQueues: jest.fn<() => unknown[]>().mockReturnValue([]),
+      getQueueInfo: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
       shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<QueueManager>;
 
@@ -118,6 +119,7 @@ describe('Integration Tests', () => {
       } as Response);
 
       await processor.process({
+        agentName: 'test-agent',
         targetUrl: 'http://example.com/api',
         method: 'GET',
         timeout: 5000,
@@ -151,6 +153,7 @@ describe('Integration Tests', () => {
 
       await expect(
         processor.process({
+          agentName: 'test-agent',
           targetUrl: 'http://example.com/api',
           method: 'GET',
           timeout: 5000,
@@ -162,6 +165,17 @@ describe('Integration Tests', () => {
   describe('Queue Management', () => {
     it('should list all queues', async () => {
       mockQueueManager.listQueues.mockResolvedValueOnce(['queue1', 'queue2', 'queue3']);
+      mockQueueManager.getQueueInfo.mockImplementation(async (queueName: string) => {
+        return {
+          name: queueName,
+          waiting: 0,
+          active: 0,
+          completed: 0,
+          failed: 0,
+          delayed: 0,
+          agents: [],
+        };
+      });
 
       await app.initialize();
 
@@ -170,7 +184,7 @@ describe('Integration Tests', () => {
       expect(response.status).toBe(200);
       const body = response.body;
       expect(body.queues).toHaveLength(3);
-      expect(body.queues).toContain('queue1');
+      expect(body.queues[0]).toHaveProperty('name', 'queue1');
     });
   });
 });

@@ -1,58 +1,49 @@
 #!/usr/bin/env python3
 """
-Get Agent Status Tool
+Get Queue Info Tool
 
-Gets the status of a specific agent by name.
+Gets detailed information about a specific queue.
 
 Usage:
-    python get_agent_status.py --name <agent-name>
+    python get_queue_info.py --queue-name <queue-name>
 
 Required Arguments:
-    --name, -n              Name of the agent to get status for
+    --queue-name, -q         Name of the queue to get information for
 
 Output:
     Returns a JSON object containing:
-    - name: Agent name
-    - isActive: Whether the agent is currently active
-    - lastRun: Last execution time (if available)
-    - nextRun: Next scheduled execution time (if available)
-    - jobId: Job ID (if available)
-    - targetUrl: Target URL for the agent
-    - method: HTTP method used
-    - headers: HTTP headers (if configured)
-    - body: Request body (if configured)
-    - schedule: Cron pattern or interval (for recurring agents)
-    - timeout: Request timeout in milliseconds
-    - queue: Queue name where the agent is located
+    - name: Queue name
+    - waiting: Number of waiting jobs
+    - active: Number of active jobs
+    - completed: Number of completed jobs
+    - failed: Number of failed jobs
+    - delayed: Number of delayed jobs
+    - agents: Array of agent names in this queue
 
 Example:
-    python get_agent_status.py --name "daily-check"
+    python get_queue_info.py --queue-name "default"
 
 Example Output:
     {
-      "name": "daily-check",
-      "isActive": true,
-      "lastRun": "2024-01-15T10:00:00Z",
-      "nextRun": "2024-01-16T10:00:00Z",
-      "jobId": "agent:daily-check",
-      "targetUrl": "http://api.example.com/check",
-      "method": "GET",
-      "headers": {},
-      "body": null,
-      "schedule": "0 0 * * *",
-      "timeout": 30000
+      "name": "default",
+      "waiting": 0,
+      "active": 1,
+      "completed": 5,
+      "failed": 0,
+      "delayed": 2,
+      "agents": ["daily-check", "hourly-sync"]
     }
 
 Error Output:
-    If the agent is not found, returns:
+    If the queue is not found, returns:
     {
-      "error": "Agent \"agent-name\" not found"
+      "error": "Queue \"queue-name\" not found"
     }
 
 Note:
     This script outputs the expected format.
-    To actually get agent status, you would need to:
-    1. Use the cursor-agents MCP server's get_agent_status tool
+    To actually get queue info, you would need to:
+    1. Use the cursor-agents MCP server's get_queue_info tool
     2. Or make an HTTP request to the cursor-agents API
 """
 
@@ -67,15 +58,16 @@ import urllib.error
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Get the status of a specific agent",
+        description="Get detailed information about a specific queue",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
     
     parser.add_argument(
-        '--name', '-n',
+        '--queue-name', '-q',
         required=True,
-        help='Name of the agent to get status for'
+        dest='queue_name',
+        help='Name of the queue to get information for'
     )
     
     return parser.parse_args()
@@ -105,9 +97,9 @@ def main():
     
     # Get API URL from environment or use default
     api_url = os.getenv('CURSOR_AGENTS_URL', 'http://cursor-agents:3002')
-    url = f"{api_url}/agents/{args.name}"
+    url = f"{api_url}/queues/{args.queue_name}"
     
-    # Make HTTP request to get agent status
+    # Make HTTP request to get queue info
     result = make_request(url)
     
     if 'error' in result:

@@ -56,11 +56,50 @@ export class CursorAgentsApp {
     // Queue management endpoints
     this.app.get('/queues', async (_req: Request, res: Response) => {
       try {
-        const queues = await this.queueManager.listQueues();
-        res.json({ queues });
+        const queueNames = await this.queueManager.listQueues();
+        const queueInfos = await Promise.all(
+          queueNames.map(async (queueName) => {
+            return await this.queueManager.getQueueInfo(queueName);
+          })
+        );
+        res.json({ queues: queueInfos.filter((info) => info !== null) });
       } catch (error) {
         logger.error('Failed to list queues', { error });
         res.status(500).json({ error: 'Failed to list queues' });
+      }
+    });
+
+    // Get queue info
+    this.app.get('/queues/:queueName', async (req: Request, res: Response): Promise<void> => {
+      try {
+        const { queueName } = req.params;
+        const info = await this.queueManager.getQueueInfo(queueName);
+
+        if (!info) {
+          res.status(404).json({ error: `Queue "${queueName}" not found` });
+          return;
+        }
+
+        res.json(info);
+      } catch (error) {
+        logger.error('Failed to get queue info', { error, queueName: req.params.queueName });
+        res.status(500).json({ error: 'Failed to get queue info' });
+      }
+    });
+
+    // Delete queue
+    this.app.delete('/queues/:queueName', async (req: Request, res: Response): Promise<void> => {
+      try {
+        const { queueName } = req.params;
+        await this.queueManager.deleteQueue(queueName);
+        res.json({
+          success: true,
+          message: `Queue "${queueName}" deleted successfully`,
+        });
+      } catch (error) {
+        logger.error('Failed to delete queue', { error, queueName: req.params.queueName });
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete queue';
+        res.status(500).json({ error: errorMessage });
       }
     });
 
@@ -128,7 +167,8 @@ export class CursorAgentsApp {
     // Create an agent
     this.app.post('/agents', async (req: Request, res: Response): Promise<void> => {
       try {
-        const { name, targetUrl, method, headers, body, schedule, oneTime, timeout } = req.body;
+        const { name, targetUrl, method, headers, body, schedule, oneTime, timeout, queue } =
+          req.body;
 
         if (!name || !targetUrl) {
           res.status(400).json({
@@ -153,6 +193,7 @@ export class CursorAgentsApp {
             headers: headers || {},
             body,
             timeout: timeout || 30000,
+            queue,
           });
         } else {
           job = await this.queueManager.addRecurringAgent({
@@ -163,6 +204,7 @@ export class CursorAgentsApp {
             body,
             schedule: schedule!,
             timeout: timeout || 30000,
+            queue,
           });
         }
 
@@ -176,6 +218,7 @@ export class CursorAgentsApp {
             method: method || 'POST',
             oneTime,
             schedule: oneTime ? undefined : schedule,
+            queue: queue || 'default',
           },
         });
       } catch (error) {

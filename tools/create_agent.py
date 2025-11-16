@@ -21,9 +21,10 @@ Optional Arguments:
                             Example: '{"key": "value"}'
     --schedule, -s           Cron pattern (e.g., "0 */5 * * * *" for every 5 minutes) or interval
                             Required if --one-time is false
-    --one-time, -o           If true, run the agent once immediately (default: false)
-    --timeout, -t            Request timeout in milliseconds (default: 30000)
-    --help, -h               Show this help message
+    --one-time, -o             If true, run the agent once immediately (default: false)
+    --timeout, -t              Request timeout in milliseconds (default: 30000)
+    --queue, -q                Queue name to use for this agent (defaults to "default" if not specified)
+    --help, -h                 Show this help message
 
 Examples:
     # Create a one-time agent
@@ -37,6 +38,11 @@ Examples:
     python create_agent.py --name "api-sync" --target-url "http://api.example.com/sync" \\
         --method POST --headers '{"Authorization": "Bearer token"}' \\
         --body '{"action": "sync"}' --schedule "0 */30 * * * *"
+
+    # Create an agent in a specific queue
+    python create_agent.py --name "daily-note" --target-url "http://cursor-runner:3001/cursor/iterate" \\
+        --schedule "0 8 * * *" --queue "daily-tasks" \\
+        --body '{"prompt": "create todays daily note in the obsidian repository"}'
 """
 
 import argparse
@@ -101,6 +107,10 @@ def parse_arguments() -> argparse.Namespace:
         default=30000,
         help='Request timeout in milliseconds (default: 30000)'
     )
+    parser.add_argument(
+        '--queue', '-q',
+        help='Queue name to use for this agent (defaults to "default" if not specified)'
+    )
     
     return parser.parse_args()
 
@@ -145,6 +155,9 @@ def build_agent_config(args: argparse.Namespace) -> Dict[str, Any]:
     
     if not args.one_time and args.schedule:
         config['schedule'] = args.schedule
+    
+    if args.queue:
+        config['queue'] = args.queue
     
     return config
 

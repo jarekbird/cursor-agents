@@ -43,6 +43,7 @@ describe('CursorAgentsApp', () => {
       getPromptStatus: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
       removeRecurringPrompt: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       getQueues: jest.fn<() => unknown[]>().mockReturnValue([]),
+      getQueueInfo: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
       shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<QueueManager>;
 
@@ -72,6 +73,17 @@ describe('CursorAgentsApp', () => {
   describe('GET /queues', () => {
     it('should return list of queues', async () => {
       mockQueueManager.listQueues.mockResolvedValueOnce(['queue1', 'queue2']);
+      mockQueueManager.getQueueInfo.mockImplementation(async (queueName: string) => {
+        return {
+          name: queueName,
+          waiting: 0,
+          active: 0,
+          completed: 0,
+          failed: 0,
+          delayed: 0,
+          agents: [],
+        };
+      });
 
       await app.initialize();
 
@@ -79,7 +91,8 @@ describe('CursorAgentsApp', () => {
 
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('queues');
-      expect(response.body.queues).toEqual(['queue1', 'queue2']);
+      expect(response.body.queues).toHaveLength(2);
+      expect(response.body.queues[0]).toHaveProperty('name');
     });
 
     it('should handle errors', async () => {

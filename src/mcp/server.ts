@@ -13,6 +13,7 @@ export interface AgentConfig {
   schedule?: string; // Cron pattern or interval for recurring jobs
   oneTime?: boolean; // If true, run once immediately; if false, use schedule
   timeout?: number; // Request timeout in milliseconds
+  queue?: string; // Queue name (defaults to 'default' if not specified)
 }
 
 export class MCPServer {
@@ -70,6 +71,10 @@ export class MCPServer {
               'If true, run the agent once immediately. If false, use schedule for recurring execution.'
             ),
           timeout: z.number().optional().default(30000).describe('Request timeout in milliseconds'),
+          queue: z
+            .string()
+            .optional()
+            .describe('Queue name to use for this agent (defaults to "default" if not specified)'),
         },
       },
       async (args) => {
@@ -211,6 +216,112 @@ export class MCPServer {
       }
     );
 
+    // Register list_queues tool
+    this.server.registerTool(
+      'list_queues',
+      {
+        title: 'List Queues',
+        description: 'List all available queues',
+        inputSchema: {},
+      },
+      async () => {
+        logger.info('MCP tool called', { tool: 'list_queues' });
+        process.stderr.write(`[MCP] tool called: list_queues\n`);
+        try {
+          const result = await this.handleListQueues();
+          logger.info('MCP tool completed', { tool: 'list_queues', success: !result.isError });
+          process.stderr.write(`[MCP] tool completed: list_queues success=${!result.isError}\n`);
+          return result;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('MCP tool error', { tool: 'list_queues', error: errorMessage });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    // Register get_queue_info tool
+    this.server.registerTool(
+      'get_queue_info',
+      {
+        title: 'Get Queue Info',
+        description: 'Get detailed information about a specific queue',
+        inputSchema: {
+          queueName: z.string().describe('Name of the queue'),
+        },
+      },
+      async (args) => {
+        logger.info('MCP tool called', {
+          tool: 'get_queue_info',
+          args: { queueName: args.queueName },
+        });
+        process.stderr.write(`[MCP] tool called: get_queue_info queueName=${args.queueName}\n`);
+        try {
+          const result = await this.handleGetQueueInfo(args);
+          logger.info('MCP tool completed', { tool: 'get_queue_info', success: !result.isError });
+          process.stderr.write(`[MCP] tool completed: get_queue_info success=${!result.isError}\n`);
+          return result;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('MCP tool error', { tool: 'get_queue_info', error: errorMessage });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    // Register delete_queue tool
+    this.server.registerTool(
+      'delete_queue',
+      {
+        title: 'Delete Queue',
+        description: 'Delete an empty queue (cannot delete default queue or queues with jobs)',
+        inputSchema: {
+          queueName: z.string().describe('Name of the queue to delete'),
+        },
+      },
+      async (args) => {
+        logger.info('MCP tool called', {
+          tool: 'delete_queue',
+          args: { queueName: args.queueName },
+        });
+        process.stderr.write(`[MCP] tool called: delete_queue queueName=${args.queueName}\n`);
+        try {
+          const result = await this.handleDeleteQueue(args);
+          logger.info('MCP tool completed', { tool: 'delete_queue', success: !result.isError });
+          process.stderr.write(`[MCP] tool completed: delete_queue success=${!result.isError}\n`);
+          return result;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('MCP tool error', { tool: 'delete_queue', error: errorMessage });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
     // Register agent resources dynamically
     // Use ResourceTemplate with a list function to provide all available agents
     logger.info('Registering agent resources...');
@@ -279,6 +390,7 @@ export class MCPServer {
       schedule,
       oneTime = false,
       timeout = 30000,
+      queue,
     } = config;
 
     if (!oneTime && !schedule) {
@@ -295,6 +407,7 @@ export class MCPServer {
         headers,
         body,
         timeout,
+        queue,
       });
     } else {
       // For recurring jobs, use the schedule
@@ -306,6 +419,7 @@ export class MCPServer {
         body,
         schedule: schedule!,
         timeout,
+        queue,
       });
     }
 
@@ -323,6 +437,7 @@ export class MCPServer {
                 method,
                 oneTime,
                 schedule: oneTime ? undefined : schedule,
+                queue: queue || 'default',
               },
             },
             null,
@@ -405,6 +520,86 @@ export class MCPServer {
             {
               success: true,
               message: `Agent "${name}" deleted successfully`,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+
+  private async handleListQueues(): Promise<{
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: boolean;
+  }> {
+    const queues = await this.queueManager.listQueues();
+    const queueInfos = await Promise.all(
+      queues.map(async (queueName) => {
+        return await this.queueManager.getQueueInfo(queueName);
+      })
+    );
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              queues: queueInfos.filter((info) => info !== null),
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+
+  private async handleGetQueueInfo(args: { queueName: string }): Promise<{
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: boolean;
+  }> {
+    const { queueName } = args;
+    const info = await this.queueManager.getQueueInfo(queueName);
+
+    if (!info) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({ error: `Queue "${queueName}" not found` }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(info, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async handleDeleteQueue(args: { queueName: string }): Promise<{
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: boolean;
+  }> {
+    const { queueName } = args;
+    await this.queueManager.deleteQueue(queueName);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              success: true,
+              message: `Queue "${queueName}" deleted successfully`,
             },
             null,
             2

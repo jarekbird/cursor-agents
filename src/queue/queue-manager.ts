@@ -24,6 +24,7 @@ export interface AgentConfig {
   schedule?: string; // Cron pattern or interval for recurring jobs
   oneTime?: boolean; // If true, run once immediately
   timeout?: number; // Request timeout in milliseconds
+  queue?: string; // Queue name (defaults to 'default' if not specified)
 }
 
 export interface PromptStatus {
@@ -41,6 +42,7 @@ export interface AgentStatus extends PromptStatus {
   body?: unknown;
   schedule?: string;
   timeout?: number;
+  queue?: string; // Queue name where the agent is located
 }
 
 // Factory function types for dependency injection
@@ -63,6 +65,9 @@ export class QueueManager {
   private queueFactory: QueueFactory;
   private workerFactory: WorkerFactory;
   private queueEventsFactory: QueueEventsFactory;
+
+  // Default queue name when none is specified
+  private static readonly DEFAULT_QUEUE = 'default';
 
   /**
    * Get all queues for Bull Board dashboard
@@ -349,61 +354,81 @@ export class QueueManager {
   }
 
   /**
+   * Get or create a queue by name, including worker and queue events
+   */
+  private getOrCreateQueue(queueName: string): Queue {
+    let queue = this.queues.get(queueName);
+    if (!queue) {
+      queue = this.queueFactory(queueName, this.getConnectionOptions());
+      this.queues.set(queueName, queue);
+
+      // Create worker for this queue if it doesn't exist
+      if (!this.workers.has(queueName)) {
+        logger.info('Creating worker for queue', { queueName });
+        const worker = this.workerFactory(
+          queueName,
+          async (job) => {
+            logger.info('Worker picked up job', { jobId: job.id, name: job.name, queueName });
+            await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
+          },
+          {
+            ...this.getConnectionOptions(),
+            concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
+          }
+        );
+
+        worker.on('completed', (job) => {
+          logger.info('Agent job completed', { jobId: job.id, name: job.name, queueName });
+        });
+
+        worker.on('failed', (job, err) => {
+          logger.error('Agent job failed', {
+            jobId: job?.id,
+            name: job?.name,
+            queueName,
+            error: err,
+          });
+        });
+
+        worker.on('active', (job) => {
+          logger.info('Agent job started processing', {
+            jobId: job.id,
+            name: job.name,
+            queueName,
+          });
+        });
+
+        this.workers.set(queueName, worker);
+        logger.info('Worker created and ready', { queueName });
+
+        // Create queue events listener
+        const queueEvents = this.queueEventsFactory(queueName, this.getConnectionOptions());
+        this.queueEvents.set(queueName, queueEvents);
+      }
+    }
+
+    return queue;
+  }
+
+  /**
    * Add a one-time agent that executes immediately
    */
   async addOneTimeAgent(config: AgentConfig): Promise<{ id: string; name: string }> {
-    const { name, targetUrl, method = 'POST', headers = {}, body, timeout = 30000 } = config;
+    const {
+      name,
+      targetUrl,
+      method = 'POST',
+      headers = {},
+      body,
+      timeout = 30000,
+      queue = QueueManager.DEFAULT_QUEUE,
+    } = config;
 
-    let queue = this.queues.get(name);
-    if (!queue) {
-      queue = this.queueFactory(name, this.getConnectionOptions());
-      this.queues.set(name, queue);
-
-      // Create worker for this queue
-      logger.info('Creating worker for queue', { queueName: name });
-      const worker = this.workerFactory(
-        name,
-        async (job) => {
-          logger.info('Worker picked up job', { jobId: job.id, name: job.name, queueName: name });
-          await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
-        },
-        {
-          ...this.getConnectionOptions(),
-          concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
-        }
-      );
-
-      worker.on('completed', (job) => {
-        logger.info('Agent job completed', { jobId: job.id, name: job.name, queueName: name });
-      });
-
-      worker.on('failed', (job, err) => {
-        logger.error('Agent job failed', {
-          jobId: job?.id,
-          name: job?.name,
-          queueName: name,
-          error: err,
-        });
-      });
-
-      worker.on('active', (job) => {
-        logger.info('Agent job started processing', {
-          jobId: job.id,
-          name: job.name,
-          queueName: name,
-        });
-      });
-
-      this.workers.set(name, worker);
-      logger.info('Worker created and ready', { queueName: name });
-
-      // Create queue events listener
-      const queueEvents = this.queueEventsFactory(name, this.getConnectionOptions());
-      this.queueEvents.set(name, queueEvents);
-    }
+    const queueInstance = this.getOrCreateQueue(queue);
 
     // Add one-time job
     const jobData: AgentJobData = {
+      agentName: name,
       targetUrl,
       method,
       headers,
@@ -411,12 +436,13 @@ export class QueueManager {
       timeout,
     };
 
-    const job = await queue.add(name, jobData, {
+    const job = await queueInstance.add(name, jobData, {
       jobId: `agent:${name}:${Date.now()}`,
     });
 
     logger.info('One-time agent added', {
       name,
+      queue,
       jobId: job.id,
       targetUrl,
       method,
@@ -437,59 +463,14 @@ export class QueueManager {
       body,
       schedule,
       timeout = 30000,
+      queue = QueueManager.DEFAULT_QUEUE,
     } = config;
 
     if (!schedule) {
       throw new Error('Schedule is required for recurring agents');
     }
 
-    let queue = this.queues.get(name);
-    if (!queue) {
-      queue = this.queueFactory(name, this.getConnectionOptions());
-      this.queues.set(name, queue);
-
-      // Create worker for this queue
-      logger.info('Creating worker for queue', { queueName: name });
-      const worker = this.workerFactory(
-        name,
-        async (job) => {
-          logger.info('Worker picked up job', { jobId: job.id, name: job.name, queueName: name });
-          await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
-        },
-        {
-          ...this.getConnectionOptions(),
-          concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
-        }
-      );
-
-      worker.on('completed', (job) => {
-        logger.info('Agent job completed', { jobId: job.id, name: job.name, queueName: name });
-      });
-
-      worker.on('failed', (job, err) => {
-        logger.error('Agent job failed', {
-          jobId: job?.id,
-          name: job?.name,
-          queueName: name,
-          error: err,
-        });
-      });
-
-      worker.on('active', (job) => {
-        logger.info('Agent job started processing', {
-          jobId: job.id,
-          name: job.name,
-          queueName: name,
-        });
-      });
-
-      this.workers.set(name, worker);
-      logger.info('Worker created and ready', { queueName: name });
-
-      // Create queue events listener
-      const queueEvents = this.queueEventsFactory(name, this.getConnectionOptions());
-      this.queueEvents.set(name, queueEvents);
-    }
+    const queueInstance = this.getOrCreateQueue(queue);
 
     // Add recurring job
     const repeatOptions: RepeatOptions =
@@ -499,12 +480,13 @@ export class QueueManager {
 
     // Remove existing repeatable job if it exists
     try {
-      await queue.removeRepeatableByKey(jobId);
+      await queueInstance.removeRepeatableByKey(jobId);
     } catch {
       // Ignore if job doesn't exist
     }
 
     const jobData: AgentJobData = {
+      agentName: name,
       targetUrl,
       method,
       headers,
@@ -512,13 +494,14 @@ export class QueueManager {
       timeout,
     };
 
-    const job = await queue.add(name, jobData, {
+    const job = await queueInstance.add(name, jobData, {
       repeat: repeatOptions,
       jobId,
     });
 
     logger.info('Recurring agent added', {
       name,
+      queue,
       jobId: job.id,
       targetUrl,
       method,
@@ -529,29 +512,70 @@ export class QueueManager {
   }
 
   /**
+   * Find which queue contains an agent by searching all queues
+   */
+  private async findAgentQueue(
+    agentName: string
+  ): Promise<{ queue: Queue; queueName: string } | null> {
+    for (const [queueName, queue] of this.queues) {
+      // Check repeatable jobs first (for recurring agents)
+      const repeatableJobs = await queue.getRepeatableJobs();
+      const jobKey = `agent:${agentName}`;
+      const repeatableJob = repeatableJobs.find((j) => j.id === jobKey || j.key === jobKey);
+
+      if (repeatableJob) {
+        return { queue, queueName };
+      }
+
+      // Check waiting, active, and completed jobs
+      const [waiting, active, completed] = await Promise.all([
+        queue.getWaiting(0, 100),
+        queue.getActive(0, 100),
+        queue.getCompleted(0, 100),
+      ]);
+
+      const allJobs = [...waiting, ...active, ...completed];
+      const agentJob = allJobs.find((job) => {
+        if (job.name === agentName) return true;
+        const jobData = job.data as AgentJobData;
+        return jobData?.agentName === agentName;
+      });
+
+      if (agentJob) {
+        return { queue, queueName };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Get agent status with full configuration
    */
   async getAgentStatus(name: string): Promise<AgentStatus | null> {
-    const queue = this.queues.get(name);
-    if (!queue) {
+    const found = await this.findAgentQueue(name);
+    if (!found) {
       return null;
     }
 
-    // Get basic status
-    const basicStatus = await this.getPromptStatus(name);
-    if (!basicStatus) {
-      return null;
-    }
+    const { queue, queueName } = found;
 
     // Try to get agent configuration from the most recent job
     // Check waiting, active, and completed jobs
     const [waiting, active, completed] = await Promise.all([
-      queue.getWaiting(0, 1),
-      queue.getActive(0, 1),
-      queue.getCompleted(0, 1),
+      queue.getWaiting(0, 100),
+      queue.getActive(0, 100),
+      queue.getCompleted(0, 100),
     ]);
 
-    const recentJob = waiting[0] || active[0] || completed[0];
+    const allJobs = [...waiting, ...active, ...completed];
+    const agentJobs = allJobs.filter((job) => {
+      if (job.name === name) return true;
+      const jobData = job.data as AgentJobData;
+      return jobData?.agentName === name;
+    });
+
+    const recentJob = agentJobs[0];
     let agentConfig: Partial<AgentStatus> = {};
 
     if (recentJob && recentJob.data) {
@@ -570,21 +594,238 @@ export class QueueManager {
     const jobKey = `agent:${name}`;
     const repeatableJob = repeatableJobs.find((j) => j.id === jobKey || j.key === jobKey);
 
+    let isActive = false;
+    let lastRun: Date | undefined;
+    let nextRun: Date | undefined;
+
+    if (repeatableJob) {
+      isActive = true;
+      nextRun = repeatableJob.next ? new Date(repeatableJob.next) : undefined;
+    } else if (agentJobs.length > 0) {
+      // One-time job that exists
+      isActive = active.some((job) => {
+        if (job.name === name) return true;
+        const jobData = job.data as AgentJobData;
+        return jobData?.agentName === name;
+      });
+    }
+
+    // Get last completed job
+    const completedAgentJob = completed.find((job) => {
+      if (job.name === name) return true;
+      const jobData = job.data as AgentJobData;
+      return jobData?.agentName === name;
+    });
+
+    if (completedAgentJob?.finishedOn) {
+      lastRun = new Date(completedAgentJob.finishedOn);
+    }
+
     if (repeatableJob?.pattern) {
       agentConfig.schedule = repeatableJob.pattern;
     }
 
     return {
-      ...basicStatus,
+      name,
+      isActive,
+      lastRun,
+      nextRun,
+      jobId: repeatableJob?.id || recentJob?.id,
+      queue: queueName,
       ...agentConfig,
     };
   }
 
   /**
-   * Remove an agent (alias for removeRecurringPrompt for consistency)
+   * Remove an agent from its queue
    */
   async removeAgent(name: string): Promise<void> {
-    return this.removeRecurringPrompt(name);
+    const found = await this.findAgentQueue(name);
+    if (!found) {
+      throw new Error(`Agent "${name}" not found`);
+    }
+
+    const { queue, queueName } = found;
+
+    // Remove repeatable job if it exists
+    const jobKey = `agent:${name}`;
+    try {
+      await queue.removeRepeatableByKey(jobKey);
+    } catch (error) {
+      logger.warn('Failed to remove repeatable job', { error, name, jobKey });
+    }
+
+    // Remove any waiting or delayed jobs for this agent
+    const [waiting, delayed] = await Promise.all([
+      queue.getWaiting(0, 100),
+      queue.getDelayed(0, 100),
+    ]);
+
+    const allJobs = [...waiting, ...delayed];
+    const agentJobs = allJobs.filter((job) => {
+      if (job.name === name) return true;
+      const jobData = job.data as AgentJobData;
+      return jobData?.agentName === name;
+    });
+
+    for (const job of agentJobs) {
+      try {
+        await job.remove();
+      } catch (error) {
+        logger.warn('Failed to remove job', { error, jobId: job.id, name });
+      }
+    }
+
+    logger.info('Agent removed', { name, queue: queueName });
+
+    // Check if queue is now empty and should be cleaned up
+    await this.checkAndCleanupEmptyQueue(queueName);
+  }
+
+  /**
+   * Check if a queue is empty and optionally clean it up
+   */
+  private async checkAndCleanupEmptyQueue(queueName: string): Promise<void> {
+    const queue = this.queues.get(queueName);
+    if (!queue) {
+      return;
+    }
+
+    // Don't auto-delete the default queue
+    if (queueName === QueueManager.DEFAULT_QUEUE) {
+      return;
+    }
+
+    // Check if queue has any jobs or agents
+    const [waiting, active, delayed, repeatable] = await Promise.all([
+      queue.getWaitingCount(),
+      queue.getActiveCount(),
+      queue.getDelayedCount(),
+      queue.getRepeatableJobs(),
+    ]);
+
+    const hasJobs = waiting > 0 || active > 0 || delayed > 0 || repeatable.length > 0;
+
+    if (!hasJobs) {
+      logger.info('Queue is empty, cleaning up', { queueName });
+      await this.deleteQueue(queueName);
+    }
+  }
+
+  /**
+   * Delete a queue and clean up all associated resources
+   */
+  async deleteQueue(queueName: string): Promise<void> {
+    const queue = this.queues.get(queueName);
+    if (!queue) {
+      throw new Error(`Queue "${queueName}" not found`);
+    }
+
+    // Don't allow deleting the default queue
+    if (queueName === QueueManager.DEFAULT_QUEUE) {
+      throw new Error(`Cannot delete the default queue`);
+    }
+
+    // Check if queue has any active jobs
+    const [waiting, active, delayed, repeatable] = await Promise.all([
+      queue.getWaitingCount(),
+      queue.getActiveCount(),
+      queue.getDelayedCount(),
+      queue.getRepeatableJobs(),
+    ]);
+
+    if (waiting > 0 || active > 0 || delayed > 0 || repeatable.length > 0) {
+      throw new Error(
+        `Cannot delete queue "${queueName}" - it still has jobs. Remove all agents first.`
+      );
+    }
+
+    // Close and remove worker
+    const worker = this.workers.get(queueName);
+    if (worker) {
+      await worker.close();
+      this.workers.delete(queueName);
+      logger.info('Worker closed', { queueName });
+    }
+
+    // Close and remove queue events
+    const queueEvents = this.queueEvents.get(queueName);
+    if (queueEvents) {
+      await queueEvents.close();
+      this.queueEvents.delete(queueName);
+      logger.info('Queue events closed', { queueName });
+    }
+
+    // Close and remove queue
+    await queue.close();
+    this.queues.delete(queueName);
+    logger.info('Queue deleted', { queueName });
+  }
+
+  /**
+   * Get queue information including job counts
+   */
+  async getQueueInfo(queueName: string): Promise<{
+    name: string;
+    waiting: number;
+    active: number;
+    completed: number;
+    failed: number;
+    delayed: number;
+    agents: string[];
+  } | null> {
+    const queue = this.queues.get(queueName);
+    if (!queue) {
+      return null;
+    }
+
+    const [waiting, active, completed, failed, delayed, repeatable] = await Promise.all([
+      queue.getWaitingCount(),
+      queue.getActiveCount(),
+      queue.getCompletedCount(),
+      queue.getFailedCount(),
+      queue.getDelayedCount(),
+      queue.getRepeatableJobs(),
+    ]);
+
+    // Extract agent names from repeatable jobs and recent jobs
+    const agentNames = new Set<string>();
+
+    // From repeatable jobs
+    for (const job of repeatable) {
+      if (job.id?.startsWith('agent:')) {
+        const agentName = job.id.replace('agent:', '');
+        agentNames.add(agentName);
+      }
+    }
+
+    // From recent jobs
+    const [recentWaiting, recentActive, recentCompleted] = await Promise.all([
+      queue.getWaiting(0, 100),
+      queue.getActive(0, 100),
+      queue.getCompleted(0, 100),
+    ]);
+
+    const allRecentJobs = [...recentWaiting, ...recentActive, ...recentCompleted];
+    for (const job of allRecentJobs) {
+      if (job.name) {
+        agentNames.add(job.name);
+      }
+      const jobData = job.data as AgentJobData;
+      if (jobData?.agentName) {
+        agentNames.add(jobData.agentName);
+      }
+    }
+
+    return {
+      name: queueName,
+      waiting,
+      active,
+      completed,
+      failed,
+      delayed,
+      agents: Array.from(agentNames),
+    };
   }
 
   async shutdown(): Promise<void> {
