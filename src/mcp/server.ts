@@ -73,8 +73,22 @@ export class MCPServer {
         },
       },
       async (args) => {
+        logger.info('MCP tool called', {
+          tool: 'create_agent',
+          args: {
+            name: args.name,
+            targetUrl: args.targetUrl,
+            method: args.method,
+            hasBody: !!args.body,
+            schedule: args.schedule,
+            oneTime: args.oneTime,
+            timeout: args.timeout,
+          },
+        });
         try {
-          return await this.handleCreateAgent(args);
+          const result = await this.handleCreateAgent(args);
+          logger.info('MCP tool completed', { tool: 'create_agent', success: !result.isError });
+          return result;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error('MCP tool error', { tool: 'create_agent', error: errorMessage });
@@ -100,8 +114,11 @@ export class MCPServer {
         inputSchema: {},
       },
       async () => {
+        logger.info('MCP tool called', { tool: 'list_agents' });
         try {
-          return await this.handleListAgents();
+          const result = await this.handleListAgents();
+          logger.info('MCP tool completed', { tool: 'list_agents', success: !result.isError });
+          return result;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error('MCP tool error', { tool: 'list_agents', error: errorMessage });
@@ -129,8 +146,11 @@ export class MCPServer {
         },
       },
       async (args) => {
+        logger.info('MCP tool called', { tool: 'get_agent_status', args: { name: args.name } });
         try {
-          return await this.handleGetAgentStatus(args);
+          const result = await this.handleGetAgentStatus(args);
+          logger.info('MCP tool completed', { tool: 'get_agent_status', success: !result.isError });
+          return result;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error('MCP tool error', { tool: 'get_agent_status', error: errorMessage });
@@ -158,8 +178,11 @@ export class MCPServer {
         },
       },
       async (args) => {
+        logger.info('MCP tool called', { tool: 'delete_agent', args: { name: args.name } });
         try {
-          return await this.handleDeleteAgent(args);
+          const result = await this.handleDeleteAgent(args);
+          logger.info('MCP tool completed', { tool: 'delete_agent', success: !result.isError });
+          return result;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error('MCP tool error', { tool: 'delete_agent', error: errorMessage });
@@ -183,16 +206,20 @@ export class MCPServer {
       'agent',
       new ResourceTemplate('agent://{name}', {
         list: async (_extra) => {
+          logger.info('MCP resource list requested', { resourceType: 'agent' });
           const queues = await this.queueManager.listQueues();
           logger.info('Listing agent resources', { queueCount: queues.length });
-          return {
-            resources: queues.map((name) => ({
-              uri: `agent://${name}`,
-              name: name,
-              description: `Agent: ${name}`,
-              mimeType: 'application/json',
-            })),
-          };
+          const resources = queues.map((name) => ({
+            uri: `agent://${name}`,
+            name: name,
+            description: `Agent: ${name}`,
+            mimeType: 'application/json',
+          }));
+          logger.info('MCP resource list completed', {
+            resourceType: 'agent',
+            resourceCount: resources.length,
+          });
+          return { resources };
         },
       }),
       {
@@ -202,13 +229,16 @@ export class MCPServer {
       },
       async (uri, params) => {
         const name = typeof params.name === 'string' ? params.name : params.name[0];
+        logger.info('MCP resource read requested', { resourceType: 'agent', uri: uri.href, name });
         logger.info('Reading agent resource', { uri: uri.href, name });
         const status = await this.queueManager.getAgentStatus(name);
 
         if (!status) {
+          logger.warn('MCP resource not found', { resourceType: 'agent', uri: uri.href, name });
           throw new Error(`Agent "${name}" not found`);
         }
 
+        logger.info('MCP resource read completed', { resourceType: 'agent', uri: uri.href, name });
         return {
           contents: [
             {
