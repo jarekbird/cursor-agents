@@ -269,10 +269,11 @@ export class QueueManager {
       this.queues.set(name, queue);
 
       // Create worker for this queue
+      logger.info('Creating worker for queue', { queueName: name });
       const worker = this.workerFactory(
         name,
         async (job) => {
-          logger.info('Processing agent job', { jobId: job.id, name: job.name });
+          logger.info('Worker picked up job', { jobId: job.id, name: job.name, queueName: name });
           await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
         },
         {
@@ -282,14 +283,28 @@ export class QueueManager {
       );
 
       worker.on('completed', (job) => {
-        logger.info('Agent job completed', { jobId: job.id, name: job.name });
+        logger.info('Agent job completed', { jobId: job.id, name: job.name, queueName: name });
       });
 
       worker.on('failed', (job, err) => {
-        logger.error('Agent job failed', { jobId: job?.id, name: job?.name, error: err });
+        logger.error('Agent job failed', {
+          jobId: job?.id,
+          name: job?.name,
+          queueName: name,
+          error: err,
+        });
+      });
+
+      worker.on('active', (job) => {
+        logger.info('Agent job started processing', {
+          jobId: job.id,
+          name: job.name,
+          queueName: name,
+        });
       });
 
       this.workers.set(name, worker);
+      logger.info('Worker created and ready', { queueName: name });
 
       // Create queue events listener
       const queueEvents = this.queueEventsFactory(name, { connection: this.redis });
@@ -345,10 +360,11 @@ export class QueueManager {
       this.queues.set(name, queue);
 
       // Create worker for this queue
+      logger.info('Creating worker for queue', { queueName: name });
       const worker = this.workerFactory(
         name,
         async (job) => {
-          logger.info('Processing agent job', { jobId: job.id, name: job.name });
+          logger.info('Worker picked up job', { jobId: job.id, name: job.name, queueName: name });
           await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
         },
         {
@@ -358,14 +374,28 @@ export class QueueManager {
       );
 
       worker.on('completed', (job) => {
-        logger.info('Agent job completed', { jobId: job.id, name: job.name });
+        logger.info('Agent job completed', { jobId: job.id, name: job.name, queueName: name });
       });
 
       worker.on('failed', (job, err) => {
-        logger.error('Agent job failed', { jobId: job?.id, name: job?.name, error: err });
+        logger.error('Agent job failed', {
+          jobId: job?.id,
+          name: job?.name,
+          queueName: name,
+          error: err,
+        });
+      });
+
+      worker.on('active', (job) => {
+        logger.info('Agent job started processing', {
+          jobId: job.id,
+          name: job.name,
+          queueName: name,
+        });
       });
 
       this.workers.set(name, worker);
+      logger.info('Worker created and ready', { queueName: name });
 
       // Create queue events listener
       const queueEvents = this.queueEventsFactory(name, { connection: this.redis });
