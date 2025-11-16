@@ -3,6 +3,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { QueueManager } from '../queue/queue-manager.js';
@@ -34,6 +36,7 @@ export class MCPServer {
       {
         capabilities: {
           tools: {},
+          resources: {},
         },
       }
     );
@@ -168,6 +171,47 @@ export class MCPServer {
           isError: true,
         };
       }
+    });
+
+    // List available resources
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+      const queues = await this.queueManager.listQueues();
+      return {
+        resources: queues.map((name) => ({
+          uri: `agent://${name}`,
+          name: name,
+          description: `Agent: ${name}`,
+          mimeType: 'application/json',
+        })),
+      };
+    });
+
+    // Read a specific resource
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const { uri } = request.params;
+
+      // Parse agent name from URI (format: agent://<name>)
+      const match = uri.match(/^agent:\/\/(.+)$/);
+      if (!match) {
+        throw new Error(`Invalid resource URI: ${uri}. Expected format: agent://<name>`);
+      }
+
+      const agentName = match[1];
+      const status = await this.queueManager.getAgentStatus(agentName);
+
+      if (!status) {
+        throw new Error(`Agent "${agentName}" not found`);
+      }
+
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: 'application/json',
+            text: JSON.stringify(status, null, 2),
+          },
+        ],
+      };
     });
   }
 

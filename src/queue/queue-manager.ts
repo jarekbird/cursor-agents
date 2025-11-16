@@ -34,6 +34,15 @@ export interface PromptStatus {
   jobId?: string;
 }
 
+export interface AgentStatus extends PromptStatus {
+  targetUrl?: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  headers?: Record<string, string>;
+  body?: unknown;
+  schedule?: string;
+  timeout?: number;
+}
+
 // Factory function types for dependency injection
 export type QueueFactory = (name: string, options?: { connection: Redis }) => Queue;
 
@@ -397,10 +406,55 @@ export class QueueManager {
   }
 
   /**
-   * Get agent status (alias for getPromptStatus for consistency)
+   * Get agent status with full configuration
    */
-  async getAgentStatus(name: string): Promise<PromptStatus | null> {
-    return this.getPromptStatus(name);
+  async getAgentStatus(name: string): Promise<AgentStatus | null> {
+    const queue = this.queues.get(name);
+    if (!queue) {
+      return null;
+    }
+
+    // Get basic status
+    const basicStatus = await this.getPromptStatus(name);
+    if (!basicStatus) {
+      return null;
+    }
+
+    // Try to get agent configuration from the most recent job
+    // Check waiting, active, and completed jobs
+    const [waiting, active, completed] = await Promise.all([
+      queue.getWaiting(0, 1),
+      queue.getActive(0, 1),
+      queue.getCompleted(0, 1),
+    ]);
+
+    const recentJob = waiting[0] || active[0] || completed[0];
+    let agentConfig: Partial<AgentStatus> = {};
+
+    if (recentJob && recentJob.data) {
+      const jobData = recentJob.data as AgentJobData;
+      agentConfig = {
+        targetUrl: jobData.targetUrl,
+        method: jobData.method,
+        headers: jobData.headers,
+        body: jobData.body,
+        timeout: jobData.timeout,
+      };
+    }
+
+    // Get schedule from repeatable job
+    const repeatableJobs = await queue.getRepeatableJobs();
+    const jobKey = `agent:${name}`;
+    const repeatableJob = repeatableJobs.find((j) => j.id === jobKey || j.key === jobKey);
+
+    if (repeatableJob?.pattern) {
+      agentConfig.schedule = repeatableJob.pattern;
+    }
+
+    return {
+      ...basicStatus,
+      ...agentConfig,
+    };
   }
 
   /**
