@@ -52,20 +52,18 @@ export class TaskOperatorService {
     });
 
     try {
-      // Send task to cursor-runner for processing
-      const response = await fetch(`${this.cursorRunnerUrl}/cursor/iterate/async`, {
+      // Send task to cursor-runner for processing (synchronous - waits for completion)
+      const response = await fetch(`${this.cursorRunnerUrl}/cursor/iterate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: task.prompt,
-          // Note: We don't pass a callbackUrl here - the task operator will check again later
-          // The task will be marked complete when cursor-runner finishes (or we can add a callback)
         }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        logger.error('Failed to send task to cursor-runner', {
+        logger.error('Failed to process task in cursor-runner', {
           taskId: task.id,
           status: response.status,
           error: errorText,
@@ -73,15 +71,23 @@ export class TaskOperatorService {
         return { processed: false, taskId: task.id, prompt: task.prompt };
       }
 
-      const result = (await response.json()) as { requestId?: string };
-      logger.info('Task sent to cursor-runner', {
+      const result = (await response.json()) as { success?: boolean; requestId?: string };
+      logger.info('Task processed by cursor-runner', {
         taskId: task.id,
         requestId: result.requestId,
+        success: result.success,
       });
 
-      // Note: We don't mark the task as complete here because cursor-runner processes asynchronously
-      // The task will be marked complete via a callback or manual update
-      // For now, we return the task info so the caller can handle completion
+      // Mark task as complete if the response indicates success
+      if (result.success === true) {
+        this.markTaskComplete(task.id);
+        logger.info('Task marked as complete', { taskId: task.id });
+      } else {
+        logger.warn('Task not marked as complete - response indicated failure', {
+          taskId: task.id,
+          success: result.success,
+        });
+      }
 
       return { processed: true, taskId: task.id, prompt: task.prompt };
     } catch (error) {
