@@ -1,12 +1,6 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-  type Tool,
-} from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import { QueueManager } from '../queue/queue-manager.js';
 import { logger } from '../logger.js';
 
@@ -22,201 +16,211 @@ export interface AgentConfig {
 }
 
 export class MCPServer {
-  private server: Server;
+  private server: McpServer;
   private queueManager: QueueManager;
   private transport: StdioServerTransport;
 
   constructor(queueManager: QueueManager) {
     this.queueManager = queueManager;
-    this.server = new Server(
-      {
-        name: 'cursor-agents',
-        version: '1.0.0',
-      },
-      {
-        capabilities: {
-          tools: {},
-          resources: {},
-        },
-      }
-    );
+    this.server = new McpServer({
+      name: 'cursor-agents',
+      version: '1.0.0',
+    });
 
     this.transport = new StdioServerTransport();
     this.setupHandlers();
   }
 
   private setupHandlers(): void {
-    // List available tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
-        tools: [
-          {
-            name: 'create_agent',
-            description:
-              'Create a new agent (BullMQ job) that makes HTTP requests to a target URL. Can be one-time or recurring.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                name: {
-                  type: 'string',
-                  description: 'Unique name for the agent',
-                },
-                targetUrl: {
-                  type: 'string',
-                  description:
-                    'Target URL to hit (can be public URL or Docker network URL like http://cursor-runner:3001/health)',
-                },
-                method: {
-                  type: 'string',
-                  enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-                  description: 'HTTP method to use',
-                  default: 'POST',
-                },
-                headers: {
-                  type: 'object',
-                  description: 'HTTP headers to include in the request',
-                  additionalProperties: { type: 'string' },
-                },
-                body: {
-                  type: 'object',
-                  description: 'Request body (for POST, PUT, PATCH methods)',
-                },
-                schedule: {
-                  type: 'string',
-                  description:
-                    'Cron pattern (e.g., "0 */5 * * * *" for every 5 minutes) or interval (e.g., "every 30 seconds"). Required if oneTime is false.',
-                },
-                oneTime: {
-                  type: 'boolean',
-                  description:
-                    'If true, run the agent once immediately. If false, use schedule for recurring execution.',
-                  default: false,
-                },
-                timeout: {
-                  type: 'number',
-                  description: 'Request timeout in milliseconds',
-                  default: 30000,
-                },
+    // Register create_agent tool
+    this.server.registerTool(
+      'create_agent',
+      {
+        title: 'Create Agent',
+        description:
+          'Create a new agent (BullMQ job) that makes HTTP requests to a target URL. Can be one-time or recurring.',
+        inputSchema: {
+          name: z.string().describe('Unique name for the agent'),
+          targetUrl: z
+            .string()
+            .describe(
+              'Target URL to hit (can be public URL or Docker network URL like http://cursor-runner:3001/health)'
+            ),
+          method: z
+            .enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+            .optional()
+            .default('POST')
+            .describe('HTTP method to use'),
+          headers: z
+            .record(z.string())
+            .optional()
+            .describe('HTTP headers to include in the request'),
+          body: z.unknown().optional().describe('Request body (for POST, PUT, PATCH methods)'),
+          schedule: z
+            .string()
+            .optional()
+            .describe(
+              'Cron pattern (e.g., "0 */5 * * * *" for every 5 minutes) or interval (e.g., "every 30 seconds"). Required if oneTime is false.'
+            ),
+          oneTime: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe(
+              'If true, run the agent once immediately. If false, use schedule for recurring execution.'
+            ),
+          timeout: z.number().optional().default(30000).describe('Request timeout in milliseconds'),
+        },
+      },
+      async (args) => {
+        try {
+          return await this.handleCreateAgent(args);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('MCP tool error', { tool: 'create_agent', error: errorMessage });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${errorMessage}`,
               },
-              required: ['name', 'targetUrl'],
-            },
-          },
-          {
-            name: 'list_agents',
-            description: 'List all active agents',
-            inputSchema: {
-              type: 'object',
-              properties: {},
-            },
-          },
-          {
-            name: 'get_agent_status',
-            description: 'Get the status of a specific agent',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                name: {
-                  type: 'string',
-                  description: 'Name of the agent',
-                },
-              },
-              required: ['name'],
-            },
-          },
-          {
-            name: 'delete_agent',
-            description: 'Delete/remove an agent',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                name: {
-                  type: 'string',
-                  description: 'Name of the agent to delete',
-                },
-              },
-              required: ['name'],
-            },
-          },
-        ] as Tool[],
-      };
-    });
-
-    // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
-
-      try {
-        switch (name) {
-          case 'create_agent':
-            return await this.handleCreateAgent(args);
-          case 'list_agents':
-            return await this.handleListAgents();
-          case 'get_agent_status':
-            return await this.handleGetAgentStatus(args as { name: string });
-          case 'delete_agent':
-            return await this.handleDeleteAgent(args as { name: string });
-          default:
-            throw new Error(`Unknown tool: ${name}`);
+            ],
+            isError: true,
+          };
         }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error('MCP tool error', { tool: name, error: errorMessage });
+      }
+    );
+
+    // Register list_agents tool
+    this.server.registerTool(
+      'list_agents',
+      {
+        title: 'List Agents',
+        description: 'List all active agents',
+        inputSchema: {},
+      },
+      async () => {
+        try {
+          return await this.handleListAgents();
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('MCP tool error', { tool: 'list_agents', error: errorMessage });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    // Register get_agent_status tool
+    this.server.registerTool(
+      'get_agent_status',
+      {
+        title: 'Get Agent Status',
+        description: 'Get the status of a specific agent',
+        inputSchema: {
+          name: z.string().describe('Name of the agent'),
+        },
+      },
+      async (args) => {
+        try {
+          return await this.handleGetAgentStatus(args);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('MCP tool error', { tool: 'get_agent_status', error: errorMessage });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    // Register delete_agent tool
+    this.server.registerTool(
+      'delete_agent',
+      {
+        title: 'Delete Agent',
+        description: 'Delete/remove an agent',
+        inputSchema: {
+          name: z.string().describe('Name of the agent to delete'),
+        },
+      },
+      async (args) => {
+        try {
+          return await this.handleDeleteAgent(args);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('MCP tool error', { tool: 'delete_agent', error: errorMessage });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    // Register agent resources dynamically
+    // Use ResourceTemplate with a list function to provide all available agents
+    this.server.registerResource(
+      'agent',
+      new ResourceTemplate('agent://{name}', {
+        list: async () => {
+          const queues = await this.queueManager.listQueues();
+          return {
+            resources: queues.map((name) => ({
+              uri: `agent://${name}`,
+              name: name,
+              description: `Agent: ${name}`,
+              mimeType: 'application/json',
+            })),
+          };
+        },
+      }),
+      {
+        title: 'Agent',
+        description: 'Agent configuration and status',
+        mimeType: 'application/json',
+      },
+      async (uri, params) => {
+        const name = typeof params.name === 'string' ? params.name : params.name[0];
+        const status = await this.queueManager.getAgentStatus(name);
+
+        if (!status) {
+          throw new Error(`Agent "${name}" not found`);
+        }
+
         return {
-          content: [
+          contents: [
             {
-              type: 'text',
-              text: `Error: ${errorMessage}`,
+              uri: uri.href,
+              mimeType: 'application/json',
+              text: JSON.stringify(status, null, 2),
             },
           ],
-          isError: true,
         };
       }
-    });
-
-    // List available resources
-    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      const queues = await this.queueManager.listQueues();
-      return {
-        resources: queues.map((name) => ({
-          uri: `agent://${name}`,
-          name: name,
-          description: `Agent: ${name}`,
-          mimeType: 'application/json',
-        })),
-      };
-    });
-
-    // Read a specific resource
-    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const { uri } = request.params;
-
-      // Parse agent name from URI (format: agent://<name>)
-      const match = uri.match(/^agent:\/\/(.+)$/);
-      if (!match) {
-        throw new Error(`Invalid resource URI: ${uri}. Expected format: agent://<name>`);
-      }
-
-      const agentName = match[1];
-      const status = await this.queueManager.getAgentStatus(agentName);
-
-      if (!status) {
-        throw new Error(`Agent "${agentName}" not found`);
-      }
-
-      return {
-        contents: [
-          {
-            uri,
-            mimeType: 'application/json',
-            text: JSON.stringify(status, null, 2),
-          },
-        ],
-      };
-    });
+    );
   }
 
   private async handleCreateAgent(args: unknown): Promise<{
-    content: Array<{ type: string; text: string }>;
+    content: Array<{ type: 'text'; text: string }>;
     isError?: boolean;
   }> {
     const config = args as AgentConfig;
@@ -262,7 +266,7 @@ export class MCPServer {
     return {
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: JSON.stringify(
             {
               success: true,
@@ -283,7 +287,10 @@ export class MCPServer {
     };
   }
 
-  private async handleListAgents() {
+  private async handleListAgents(): Promise<{
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: boolean;
+  }> {
     const queues = await this.queueManager.listQueues();
     const agents = await Promise.all(
       queues.map(async (name) => {
@@ -295,7 +302,7 @@ export class MCPServer {
     return {
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: JSON.stringify(
             {
               agents: agents.filter((a) => a !== null),
@@ -308,7 +315,10 @@ export class MCPServer {
     };
   }
 
-  private async handleGetAgentStatus(args: { name: string }) {
+  private async handleGetAgentStatus(args: { name: string }): Promise<{
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: boolean;
+  }> {
     const { name } = args;
     const status = await this.queueManager.getAgentStatus(name);
 
@@ -316,7 +326,7 @@ export class MCPServer {
       return {
         content: [
           {
-            type: 'text',
+            type: 'text' as const,
             text: JSON.stringify({ error: `Agent "${name}" not found` }, null, 2),
           },
         ],
@@ -327,21 +337,24 @@ export class MCPServer {
     return {
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: JSON.stringify(status, null, 2),
         },
       ],
     };
   }
 
-  private async handleDeleteAgent(args: { name: string }) {
+  private async handleDeleteAgent(args: { name: string }): Promise<{
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: boolean;
+  }> {
     const { name } = args;
     await this.queueManager.removeAgent(name);
 
     return {
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: JSON.stringify(
             {
               success: true,
