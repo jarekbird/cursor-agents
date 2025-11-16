@@ -89,7 +89,8 @@ jobs:
             fi
             
             $COMPOSE_CMD build cursor-agents || { echo "Docker build failed"; exit 1; }
-            DOMAIN_NAME=$DOMAIN_NAME $COMPOSE_CMD up -d cursor-agents || { echo "Docker up failed"; exit 1; }
+            # Force recreate container to ensure entrypoint script runs and copies new tools
+            DOMAIN_NAME=$DOMAIN_NAME $COMPOSE_CMD up -d --force-recreate --no-deps cursor-agents || { echo "Docker up failed"; exit 1; }
             echo "Deployment completed successfully"
           script_stop: true
           debug: true
