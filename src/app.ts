@@ -123,6 +123,118 @@ export class CursorAgentsApp {
         res.status(500).json({ error: 'Failed to remove recurring prompt' });
       }
     });
+
+    // Agent management endpoints
+    // Create an agent
+    this.app.post('/agents', async (req: Request, res: Response): Promise<void> => {
+      try {
+        const { name, targetUrl, method, headers, body, schedule, oneTime, timeout } = req.body;
+
+        if (!name || !targetUrl) {
+          res.status(400).json({
+            error: 'Missing required fields: name, targetUrl',
+          });
+          return;
+        }
+
+        if (!oneTime && !schedule) {
+          res.status(400).json({
+            error: 'Either oneTime must be true or schedule must be provided',
+          });
+          return;
+        }
+
+        let job;
+        if (oneTime) {
+          job = await this.queueManager.addOneTimeAgent({
+            name,
+            targetUrl,
+            method: method || 'POST',
+            headers: headers || {},
+            body,
+            timeout: timeout || 30000,
+          });
+        } else {
+          job = await this.queueManager.addRecurringAgent({
+            name,
+            targetUrl,
+            method: method || 'POST',
+            headers: headers || {},
+            body,
+            schedule: schedule!,
+            timeout: timeout || 30000,
+          });
+        }
+
+        res.json({
+          success: true,
+          message: `Agent "${name}" created successfully`,
+          agent: {
+            name: job.name,
+            jobId: job.id,
+            targetUrl,
+            method: method || 'POST',
+            oneTime,
+            schedule: oneTime ? undefined : schedule,
+          },
+        });
+      } catch (error) {
+        logger.error('Failed to create agent', { error });
+        res.status(500).json({ error: 'Failed to create agent' });
+      }
+    });
+
+    // List all agents
+    this.app.get('/agents', async (_req: Request, res: Response) => {
+      try {
+        const queues = await this.queueManager.listQueues();
+        const agents = await Promise.all(
+          queues.map(async (name) => {
+            return await this.queueManager.getAgentStatus(name);
+          })
+        );
+
+        res.json({
+          agents: agents.filter((a) => a !== null),
+        });
+      } catch (error) {
+        logger.error('Failed to list agents', { error });
+        res.status(500).json({ error: 'Failed to list agents' });
+      }
+    });
+
+    // Get agent status
+    this.app.get('/agents/:name', async (req: Request, res: Response): Promise<void> => {
+      try {
+        const { name } = req.params;
+        const status = await this.queueManager.getAgentStatus(name);
+
+        if (!status) {
+          res.status(404).json({ error: `Agent "${name}" not found` });
+          return;
+        }
+
+        res.json(status);
+      } catch (error) {
+        logger.error('Failed to get agent status', { error, name: req.params.name });
+        res.status(500).json({ error: 'Failed to get agent status' });
+      }
+    });
+
+    // Delete an agent
+    this.app.delete('/agents/:name', async (req: Request, res: Response) => {
+      try {
+        const { name } = req.params;
+        await this.queueManager.removeAgent(name);
+        res.json({
+          success: true,
+          message: `Agent "${name}" deleted successfully`,
+        });
+      } catch (error) {
+        logger.error('Failed to delete agent', { error, name: req.params.name });
+        res.status(500).json({ error: 'Failed to delete agent' });
+      }
+    });
   }
 
   async initialize(): Promise<void> {

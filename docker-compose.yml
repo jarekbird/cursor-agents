@@ -18,6 +18,11 @@ services:
       - BULLMQ_CONCURRENCY=${BULLMQ_CONCURRENCY:-5}
       # Optional: Cursor runner URL for processing prompts
       - CURSOR_RUNNER_URL=${CURSOR_RUNNER_URL:-http://cursor-runner:3001}
+    volumes:
+      # Mount shared cursor volume (contains repositories, tools, and scripts directories)
+      # Tool scripts should be placed in /cursor/tools (one script per tool)
+      # One-time scripts created by cursor-cli are placed in /cursor/scripts
+      - cursor_runner_repositories:/cursor
     networks:
       - virtual-assistant-network
     # Note: Redis and Traefik services are defined in jarek-va/docker-compose.yml
@@ -46,6 +51,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  # Reference the shared repositories volume from cursor-runner
+  cursor_runner_repositories:
+    external: true
+    name: cursor_runner_repositories
 
 networks:
   virtual-assistant-network:
