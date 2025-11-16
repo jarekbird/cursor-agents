@@ -51,9 +51,21 @@ jobs:
             BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
             git reset --hard origin/$BRANCH || { echo "Git reset failed"; exit 1; }
             
+            # Load DOMAIN_NAME from .env file if it exists, or use default
+            # Check if .env file exists in parent directory (jarek-va) or current directory
+            if [ -f "../jarek-va/.env" ]; then
+              export $(grep -v '^#' ../jarek-va/.env | grep DOMAIN_NAME | xargs)
+            elif [ -f ".env" ]; then
+              export $(grep -v '^#' .env | grep DOMAIN_NAME | xargs)
+            fi
+            
+            # Fallback to default if DOMAIN_NAME is still not set
+            export DOMAIN_NAME=${DOMAIN_NAME:-n8n.srv1099656.hstgr.cloud}
+            echo "Using DOMAIN_NAME: $DOMAIN_NAME"
+            
             # Build and deploy
             docker compose build cursor-agents || { echo "Docker build failed"; exit 1; }
-            docker compose up -d cursor-agents || { echo "Docker up failed"; exit 1; }
+            DOMAIN_NAME=$DOMAIN_NAME docker compose up -d cursor-agents || { echo "Docker up failed"; exit 1; }
             echo "Deployment completed successfully"
           script_stop: true
           debug: true
