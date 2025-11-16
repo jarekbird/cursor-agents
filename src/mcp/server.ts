@@ -181,7 +181,7 @@ export class MCPServer {
     this.server.registerResource(
       'agent',
       new ResourceTemplate('agent://{name}', {
-        list: async () => {
+        list: async (_extra) => {
           const queues = await this.queueManager.listQueues();
           return {
             resources: queues.map((name) => ({
