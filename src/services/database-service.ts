@@ -142,8 +142,8 @@ export class DatabaseService {
       const db = this.getDatabase();
 
       // Check schema and fix if needed
-      const tableInfo = db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>;
-      const hasUpdatedAt = tableInfo.some((col) => col.name === 'updatedat');
+      let tableInfo = db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>;
+      let hasUpdatedAt = tableInfo.some((col) => col.name === 'updatedat');
       const hasComplete = tableInfo.some((col) => col.name === 'complete');
 
       // Add updatedat column if missing
@@ -153,10 +153,16 @@ export class DatabaseService {
             'ALTER TABLE tasks ADD COLUMN updatedat DATETIME DEFAULT CURRENT_TIMESTAMP'
           ).run();
           logger.info('Added updatedat column to tasks table');
+          // Re-check table info after adding column
+          tableInfo = db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>;
+          hasUpdatedAt = tableInfo.some((col) => col.name === 'updatedat');
         } catch (alterError) {
           logger.warn('Failed to add updatedat column (may already exist)', {
             error: alterError instanceof Error ? alterError.message : String(alterError),
           });
+          // Re-check in case column was added by another process
+          tableInfo = db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>;
+          hasUpdatedAt = tableInfo.some((col) => col.name === 'updatedat');
         }
       }
 
@@ -167,10 +173,17 @@ export class DatabaseService {
         });
       }
 
-      // Update task status and updatedat timestamp
-      const result = db
-        .prepare('UPDATE tasks SET status = ?, updatedat = CURRENT_TIMESTAMP WHERE id = ?')
-        .run(status, taskId);
+      // Update task status and updatedat timestamp (only if column exists)
+      let result;
+      if (hasUpdatedAt) {
+        result = db
+          .prepare('UPDATE tasks SET status = ?, updatedat = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(status, taskId);
+      } else {
+        // Fallback: update only status if updatedat column doesn't exist
+        logger.warn('updatedat column not found, updating status only', { taskId });
+        result = db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run(status, taskId);
+      }
       return result.changes > 0;
     } catch (error) {
       logger.error('Failed to update task status', {
