@@ -140,6 +140,34 @@ export class DatabaseService {
   updateTaskStatus(taskId: number, status: number): boolean {
     try {
       const db = this.getDatabase();
+
+      // Check schema and fix if needed
+      const tableInfo = db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>;
+      const hasUpdatedAt = tableInfo.some((col) => col.name === 'updatedat');
+      const hasComplete = tableInfo.some((col) => col.name === 'complete');
+
+      // Add updatedat column if missing
+      if (!hasUpdatedAt) {
+        try {
+          db.prepare(
+            'ALTER TABLE tasks ADD COLUMN updatedat DATETIME DEFAULT CURRENT_TIMESTAMP'
+          ).run();
+          logger.info('Added updatedat column to tasks table');
+        } catch (alterError) {
+          logger.warn('Failed to add updatedat column (may already exist)', {
+            error: alterError instanceof Error ? alterError.message : String(alterError),
+          });
+        }
+      }
+
+      // Warn if old complete column still exists (should be removed by migration)
+      if (hasComplete) {
+        logger.warn('Tasks table still has complete column. Please run migrations to remove it.', {
+          taskId,
+        });
+      }
+
+      // Update task status and updatedat timestamp
       const result = db
         .prepare('UPDATE tasks SET status = ?, updatedat = CURRENT_TIMESTAMP WHERE id = ?')
         .run(status, taskId);
