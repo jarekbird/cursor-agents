@@ -161,7 +161,19 @@ export class TaskOperatorService {
             };
           }
 
-          // Task sent successfully
+          // Task sent successfully - mark as complete
+          // Since we're using async processing, the task operator's job is done once it's sent
+          // The actual execution happens asynchronously in cursor-runner
+          const marked = this.databaseService.markTaskComplete(task.id);
+          if (marked) {
+            logger.info('Task marked as complete after sending to cursor-runner', {
+              taskId: task.id,
+              uuid: task.uuid,
+            });
+          } else {
+            logger.warn('Failed to mark task as complete', { taskId: task.id });
+          }
+
           logger.info('Task sent to cursor-runner successfully', {
             taskId: task.id,
             uuid: task.uuid,
