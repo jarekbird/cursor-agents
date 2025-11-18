@@ -55,3 +55,6 @@ else
   node dist/scripts/inspect-db-schema.js
 fi
 
+
+
+
