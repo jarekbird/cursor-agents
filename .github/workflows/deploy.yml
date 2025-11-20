@@ -112,19 +112,27 @@ jobs:
             # Build and deploy
             # Use docker-compose (with hyphen) for compatibility, or docker compose (with space) if available
             echo "Detecting docker compose command..."
-            if command -v docker-compose &> /dev/null; then
+            set +e  # Temporarily disable exit on error for command detection
+            if command -v docker-compose >/dev/null 2>&1; then
               COMPOSE_CMD="docker-compose"
               echo "Using docker-compose (legacy)"
             else
               COMPOSE_CMD="docker compose"
               echo "Using docker compose (new)"
             fi
+            set -e  # Re-enable exit on error
             
             # Verify docker compose works
             echo "Verifying docker compose command..."
-            if ! $COMPOSE_CMD version >/dev/null 2>&1; then
+            set +e  # Temporarily disable exit on error to check version
+            VERSION_OUTPUT=$($COMPOSE_CMD version 2>&1)
+            VERSION_EXIT=$?
+            set -e  # Re-enable exit on error
+            
+            if [ $VERSION_EXIT -ne 0 ]; then
               echo "Error: docker compose command not working"
-              $COMPOSE_CMD version || true
+              echo "Version check output:"
+              echo "$VERSION_OUTPUT"
               exit 1
             fi
             echo "Docker compose command verified"
