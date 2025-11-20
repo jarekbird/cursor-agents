@@ -137,9 +137,30 @@ jobs:
             fi
             echo "Docker compose command verified"
             
+            # Verify external volumes and network exist before building
+            echo "Verifying external Docker resources..."
+            if ! docker volume inspect cursor_runner_repositories >/dev/null 2>&1; then
+              echo "Error: cursor_runner_repositories volume does not exist"
+              echo "Creating volume..."
+              docker volume create cursor_runner_repositories || exit 1
+            fi
+            if ! docker volume inspect shared_sqlite_db >/dev/null 2>&1; then
+              echo "Error: shared_sqlite_db volume does not exist"
+              echo "Creating volume..."
+              docker volume create shared_sqlite_db || exit 1
+            fi
+            if ! docker network inspect virtual-assistant-network >/dev/null 2>&1; then
+              echo "Error: virtual-assistant-network does not exist"
+              echo "Creating network..."
+              docker network create virtual-assistant-network || exit 1
+            fi
+            echo "External Docker resources verified"
+            
             echo "Building Docker container..."
+            # Export DOMAIN_NAME for docker compose (needed for label validation)
+            export DOMAIN_NAME
             set +e  # Temporarily disable exit on error to capture full output
-            BUILD_OUTPUT=$($COMPOSE_CMD build cursor-agents 2>&1)
+            BUILD_OUTPUT=$(DOMAIN_NAME=$DOMAIN_NAME $COMPOSE_CMD build cursor-agents 2>&1)
             BUILD_EXIT=$?
             set -e  # Re-enable exit on error
             
