@@ -99,19 +99,46 @@ jobs:
             export DOMAIN_NAME=${DOMAIN_NAME:-n8n.srv1099656.hstgr.cloud}
             echo "Using DOMAIN_NAME: $DOMAIN_NAME"
             
+            # Verify we're in the right directory
+            echo "Current directory: $(pwd)"
+            echo "Checking for docker-compose.yml..."
+            if [ ! -f "docker-compose.yml" ]; then
+              echo "Error: docker-compose.yml not found in current directory"
+              ls -la
+              exit 1
+            fi
+            echo "docker-compose.yml found"
+            
             # Build and deploy
             # Use docker-compose (with hyphen) for compatibility, or docker compose (with space) if available
+            echo "Detecting docker compose command..."
             if command -v docker-compose &> /dev/null; then
               COMPOSE_CMD="docker-compose"
+              echo "Using docker-compose (legacy)"
             else
               COMPOSE_CMD="docker compose"
+              echo "Using docker compose (new)"
             fi
             
+            # Verify docker compose works
+            echo "Verifying docker compose command..."
+            if ! $COMPOSE_CMD version >/dev/null 2>&1; then
+              echo "Error: docker compose command not working"
+              $COMPOSE_CMD version || true
+              exit 1
+            fi
+            echo "Docker compose command verified"
+            
             echo "Building Docker container..."
-            if ! $COMPOSE_CMD build cursor-agents; then
-              echo "Docker build failed"
-              echo "Docker build logs:"
-              $COMPOSE_CMD build cursor-agents 2>&1 || true
+            set +e  # Temporarily disable exit on error to capture full output
+            BUILD_OUTPUT=$($COMPOSE_CMD build cursor-agents 2>&1)
+            BUILD_EXIT=$?
+            set -e  # Re-enable exit on error
+            
+            if [ $BUILD_EXIT -ne 0 ]; then
+              echo "Docker build failed with exit code: $BUILD_EXIT"
+              echo "Docker build output:"
+              echo "$BUILD_OUTPUT"
               exit 1
             fi
             echo "Docker build completed successfully"
@@ -119,10 +146,15 @@ jobs:
             echo "Starting Docker container..."
             # Force recreate container to ensure entrypoint script runs and copies new tools
             # Export DOMAIN_NAME in the environment for docker compose to use in labels
-            if ! DOMAIN_NAME=$DOMAIN_NAME $COMPOSE_CMD up -d --force-recreate --no-deps cursor-agents; then
-              echo "Docker up failed"
-              echo "Docker up logs:"
-              DOMAIN_NAME=$DOMAIN_NAME $COMPOSE_CMD up -d --force-recreate --no-deps cursor-agents 2>&1 || true
+            set +e  # Temporarily disable exit on error to capture full output
+            UP_OUTPUT=$(DOMAIN_NAME=$DOMAIN_NAME $COMPOSE_CMD up -d --force-recreate --no-deps cursor-agents 2>&1)
+            UP_EXIT=$?
+            set -e  # Re-enable exit on error
+            
+            if [ $UP_EXIT -ne 0 ]; then
+              echo "Docker up failed with exit code: $UP_EXIT"
+              echo "Docker up output:"
+              echo "$UP_OUTPUT"
               exit 1
             fi
             echo "Docker container started successfully"
