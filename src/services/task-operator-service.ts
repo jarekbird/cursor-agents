@@ -135,9 +135,9 @@ export class TaskOperatorService {
         });
       }
 
-      // Send task to cursor-runner
+      // Send task to cursor-runner (synchronous - waits for completion)
       const cursorRunnerUrl = process.env.CURSOR_RUNNER_URL || 'http://cursor-runner:3001';
-      const targetUrl = `${cursorRunnerUrl}/cursor/iterate/async`;
+      const targetUrl = `${cursorRunnerUrl}/cursor/iterate`;
 
       let retryAttempt = 0;
       const maxRetries = 5;
@@ -229,12 +229,11 @@ export class TaskOperatorService {
             };
           }
 
-          // Task sent successfully - mark as complete
-          // Since we're using async processing, the task operator's job is done once it's sent
-          // The actual execution happens asynchronously in cursor-runner
+          // Task completed successfully - mark as complete
+          // Since we're using synchronous processing, the task execution is complete when we get here
           const marked = this.databaseService.markTaskComplete(task.id);
           if (marked) {
-            logger.info('Task marked as complete after sending to cursor-runner', {
+            logger.info('Task marked as complete after successful execution', {
               taskId: task.id,
               uuid: task.uuid,
             });
@@ -242,7 +241,7 @@ export class TaskOperatorService {
             logger.warn('Failed to mark task as complete', { taskId: task.id });
           }
 
-          logger.info('Task sent to cursor-runner successfully', {
+          logger.info('Task executed successfully by cursor-runner', {
             taskId: task.id,
             uuid: task.uuid,
             response: responseData,
