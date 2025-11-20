@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -68,36 +70,11 @@ jobs:
             BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
             git reset --hard origin/$BRANCH || { echo "Git reset failed"; exit 1; }
             
-            # Load DOMAIN_NAME from .env file if it exists, or use default
-            # Use a safer method that only processes valid KEY=VALUE pairs
-            # Check if .env file exists in parent directory (jarek-va) or current directory
-            if [ -f "../jarek-va/.env" ]; then
-              ENV_FILE="../jarek-va/.env"
-            elif [ -f ".env" ]; then
-              ENV_FILE=".env"
-            else
-              ENV_FILE=""
-            fi
-            
-            if [ -n "$ENV_FILE" ]; then
-              echo "Loading DOMAIN_NAME from $ENV_FILE..."
-              # Process each line individually to handle values with spaces
-              while IFS= read -r line || [ -n "$line" ]; do
-                # Skip empty lines and comments
-                if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
-                  continue
-                fi
-                # Only process lines that match KEY=VALUE pattern for DOMAIN_NAME
-                if [[ "$line" =~ ^[[:space:]]*DOMAIN_NAME= ]]; then
-                  export "$line" 2>/dev/null || true
-                  break
-                fi
-              done < "$ENV_FILE"
-            fi
-            
-            # Fallback to default if DOMAIN_NAME is still not set
-            export DOMAIN_NAME=${DOMAIN_NAME:-n8n.srv1099656.hstgr.cloud}
-            echo "Using DOMAIN_NAME: $DOMAIN_NAME"
+            # DOMAIN_NAME is optional - used for Traefik routing labels
+            # If not set, docker-compose.yml will use 'localhost' as default
+            # Can be set via GitHub secret DOMAIN_NAME or environment variable
+            export DOMAIN_NAME=${DOMAIN_NAME:-localhost}
+            echo "Using DOMAIN_NAME: $DOMAIN_NAME (default: localhost if not set)"
             
             # Verify we're in the right directory
             echo "Current directory: $(pwd)"
