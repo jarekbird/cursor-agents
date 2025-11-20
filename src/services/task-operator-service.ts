@@ -56,6 +56,54 @@ export class TaskOperatorService {
   }
 
   /**
+   * Create a new conversation in cursor-runner
+   * Returns the conversation ID or null if creation failed
+   */
+  private async createNewConversation(): Promise<string | null> {
+    try {
+      const cursorRunnerUrl = process.env.CURSOR_RUNNER_URL || 'http://cursor-runner:3001';
+      const conversationUrl = `${cursorRunnerUrl}/cursor/conversation/new`;
+
+      logger.info('Creating new conversation for task', { url: conversationUrl });
+
+      const response = await fetch(conversationUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const responseText = await response.text();
+      let responseData: any;
+
+      try {
+        responseData = JSON.parse(responseText);
+      } catch {
+        logger.error('Failed to parse conversation creation response', {
+          response: responseText.substring(0, 500),
+        });
+        return null;
+      }
+
+      if (!response.ok || !responseData.success) {
+        logger.error('Failed to create new conversation', {
+          status: response.status,
+          response: responseData,
+        });
+        return null;
+      }
+
+      logger.info('New conversation created', {
+        conversationId: responseData.conversationId,
+      });
+
+      return responseData.conversationId || null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('Error creating new conversation', { error: errorMessage });
+      return null;
+    }
+  }
+
+  /**
    * Process the next ready task from the database
    * Sends it to cursor-runner for execution
    */
@@ -74,6 +122,19 @@ export class TaskOperatorService {
         order: task.order,
       });
 
+      // Create a new conversation for this task
+      const conversationId = await this.createNewConversation();
+      if (conversationId) {
+        logger.info('Using new conversation for task', {
+          taskId: task.id,
+          conversationId,
+        });
+      } else {
+        logger.warn('Failed to create new conversation, continuing with task anyway', {
+          taskId: task.id,
+        });
+      }
+
       // Send task to cursor-runner
       const cursorRunnerUrl = process.env.CURSOR_RUNNER_URL || 'http://cursor-runner:3001';
       const targetUrl = `${cursorRunnerUrl}/cursor/iterate/async`;
@@ -83,14 +144,21 @@ export class TaskOperatorService {
 
       while (retryAttempt <= maxRetries) {
         try {
+          const requestBody: any = {
+            prompt: task.prompt,
+            repository: null, // Use default repositories directory
+            maxIterations: 25,
+          };
+
+          // Include conversationId if we successfully created a new conversation
+          if (conversationId) {
+            requestBody.conversationId = conversationId;
+          }
+
           const response = await fetch(targetUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: task.prompt,
-              repository: null, // Use default repositories directory
-              maxIterations: 25,
-            }),
+            body: JSON.stringify(requestBody),
           });
 
           const responseText = await response.text();
