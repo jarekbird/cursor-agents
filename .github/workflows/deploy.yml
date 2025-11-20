@@ -71,10 +71,10 @@ jobs:
             git reset --hard origin/$BRANCH || { echo "Git reset failed"; exit 1; }
             
             # DOMAIN_NAME is optional - used for Traefik routing labels
-            # If not set, docker-compose.yml will use 'localhost' as default
+            # Should be just the domain name (e.g., "jarekva.com") without protocol
             # Can be set via GitHub secret DOMAIN_NAME or environment variable
-            export DOMAIN_NAME=${DOMAIN_NAME:-localhost}
-            echo "Using DOMAIN_NAME: $DOMAIN_NAME (default: localhost if not set)"
+            export DOMAIN_NAME=${DOMAIN_NAME:-jarekva.com}
+            echo "Using DOMAIN_NAME: $DOMAIN_NAME"
             
             # Verify we're in the right directory
             echo "Current directory: $(pwd)"
