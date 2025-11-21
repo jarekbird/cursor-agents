@@ -96,11 +96,13 @@ export class DatabaseService {
    * 1 = complete (task completed)
    * 2 = archived (task archived)
    * 3 = backlogged (task in backlog)
+   * 4 = in_progress (task is currently being processed)
    */
   static readonly STATUS_READY = 0;
   static readonly STATUS_COMPLETE = 1;
   static readonly STATUS_ARCHIVED = 2;
   static readonly STATUS_BACKLOGGED = 3;
+  static readonly STATUS_IN_PROGRESS = 4;
 
   /**
    * Get the next ready task (lowest order)

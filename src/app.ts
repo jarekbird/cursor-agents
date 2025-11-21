@@ -370,6 +370,80 @@ export class CursorAgentsApp {
         res.status(500).json({ error: 'Failed to disable task operator' });
       }
     });
+
+    // Task operator callback endpoint (receives callbacks from cursor-runner)
+    this.app.post('/task-operator/callback', async (req: Request, res: Response): Promise<void> => {
+      try {
+        // Verify webhook secret if configured
+        const expectedSecret = process.env.WEBHOOK_SECRET;
+        if (expectedSecret) {
+          const providedSecret =
+            req.headers['x-webhook-secret'] ||
+            req.headers['x-cursor-runner-secret'] ||
+            (req.query as { secret?: string }).secret;
+
+          if (providedSecret !== expectedSecret) {
+            const secretStatus = providedSecret ? '[present]' : '[missing]';
+            logger.warn('Unauthorized task operator callback - invalid secret', {
+              providedSecret: secretStatus,
+              ip: req.ip,
+            });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+          }
+        }
+
+        const body = req.body as {
+          success?: boolean;
+          requestId?: string;
+          request_id?: string;
+          error?: string;
+          output?: string;
+          iterations?: number;
+          maxIterations?: number;
+        };
+
+        const requestId = body.requestId || body.request_id;
+
+        if (!requestId) {
+          logger.warn('Callback received without requestId', { body });
+          res.status(400).json({ error: 'requestId is required' });
+          return;
+        }
+
+        logger.info('Task operator callback received', {
+          requestId,
+          success: body.success,
+          hasError: !!body.error,
+          hasOutput: !!body.output,
+        });
+
+        // Get TaskOperatorService instance to handle the callback
+        // We need to import it here to avoid circular dependency
+        const { TaskOperatorService } = await import('./services/task-operator-service.js');
+        const taskOperatorService = new TaskOperatorService();
+
+        // Handle the callback (marks task complete or failed)
+        await taskOperatorService.handleCallback(requestId, body);
+
+        // Always return 200 OK to cursor-runner
+        res.status(200).json({
+          received: true,
+          requestId,
+        });
+      } catch (error) {
+        logger.error('Failed to process task operator callback', {
+          error: error instanceof Error ? error.message : String(error),
+          body: req.body,
+        });
+
+        // Still return 200 to prevent cursor-runner from retrying
+        res.status(200).json({
+          received: true,
+          error: 'Internal error processing callback',
+        });
+      }
+    });
   }
 
   async initialize(): Promise<void> {
