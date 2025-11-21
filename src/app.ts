@@ -378,6 +378,37 @@ export class CursorAgentsApp {
     // Update Bull Board with all queues after initialization
     this.updateBullBoard();
 
+    // Auto-start task operator if enabled
+    if (this.databaseService.isSystemSettingEnabled('task_operator')) {
+      logger.info('Task operator is enabled, auto-starting task operator agent');
+      try {
+        const agentName = 'task-operator';
+        const targetQueue = 'task-operator';
+
+        const job = await this.queueManager.addOneTimeAgent({
+          name: agentName,
+          targetUrl: 'task-operator://internal',
+          method: 'POST',
+          body: {
+            type: 'task_operator',
+            agentName,
+            queue: targetQueue,
+          },
+          queue: targetQueue,
+          timeout: 30000,
+        });
+
+        logger.info('Task operator agent auto-started', {
+          agentName,
+          queue: targetQueue,
+          jobId: job.id,
+        });
+      } catch (error) {
+        logger.error('Failed to auto-start task operator', { error });
+        // Don't throw - allow application to start even if task operator fails to start
+      }
+    }
+
     logger.info('Cursor Agents application initialized');
     logger.info('Bull Board dashboard available at /admin/queues');
   }

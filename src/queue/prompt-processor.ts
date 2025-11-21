@@ -1,5 +1,6 @@
 import { logger } from '../logger.js';
 import type { QueueManager } from './queue-manager.js';
+import { TaskOperatorService } from '../services/task-operator-service.js';
 
 export interface PromptJobData {
   prompt: string;
@@ -31,9 +32,11 @@ export interface RequeueResponse {
 
 export class PromptProcessor {
   private queueManager?: QueueManager;
+  private taskOperatorService: TaskOperatorService;
 
   constructor(queueManager?: QueueManager) {
     this.queueManager = queueManager;
+    this.taskOperatorService = new TaskOperatorService();
   }
 
   async process(data: PromptJobData | AgentJobData): Promise<void> {
@@ -58,6 +61,12 @@ export class PromptProcessor {
       body: body ? (typeof body === 'string' ? body.substring(0, 500) : body) : undefined,
       timeout,
     });
+
+    // Handle special internal task operator protocol
+    if (targetUrl === 'task-operator://internal') {
+      await this.processTaskOperatorJob(data);
+      return;
+    }
 
     try {
       const controller = new AbortController();
@@ -193,6 +202,112 @@ export class PromptProcessor {
       logger.info('Prompt processed (logged only)', {
         prompt: prompt.substring(0, 100) + '...',
       });
+    }
+  }
+
+  /**
+   * Process task operator internal job
+   * This handles the special task-operator://internal protocol
+   */
+  private async processTaskOperatorJob(data: AgentJobData): Promise<void> {
+    const { agentName, queue } = data;
+    const startTime = Date.now();
+
+    logger.info('Processing task operator job', { agentName, queue });
+
+    try {
+      // Check if task operator is enabled
+      if (!this.taskOperatorService.isTaskOperatorEnabled()) {
+        logger.info('Task operator is disabled, not processing tasks', { agentName });
+        return;
+      }
+
+      // Process the next task
+      const result = await this.taskOperatorService.processNextTask();
+
+      const duration = Date.now() - startTime;
+
+      if (result.processed) {
+        logger.info('Task operator processed task successfully', {
+          taskId: result.taskId,
+          duration: `${duration}ms`,
+        });
+
+        // Re-enqueue task operator if it's still enabled (to process next task)
+        // Use a small delay (5 seconds) to avoid tight loops
+        if (this.queueManager && this.taskOperatorService.isTaskOperatorEnabled()) {
+          const delay = 5000; // 5 seconds delay between task processing
+          logger.info('Re-enqueueing task operator to process next task', {
+            agentName,
+            delay,
+          });
+
+          await this.queueManager.addDelayedAgent({
+            name: agentName,
+            targetUrl: 'task-operator://internal',
+            method: 'POST',
+            body: data.body,
+            queue: queue || 'task-operator',
+            timeout: 30000,
+            delay,
+          });
+        }
+      } else {
+        // No task was processed (no ready tasks available)
+        logger.info('No ready tasks to process', {
+          duration: `${duration}ms`,
+        });
+
+        // Re-enqueue with a longer delay if task operator is still enabled
+        // This allows time for new tasks to be added
+        if (this.queueManager && this.taskOperatorService.isTaskOperatorEnabled()) {
+          const delay = 5000; // 5 seconds delay before checking again
+          logger.info('Re-enqueueing task operator to check for new tasks', {
+            agentName,
+            delay,
+          });
+
+          await this.queueManager.addDelayedAgent({
+            name: agentName,
+            targetUrl: 'task-operator://internal',
+            method: 'POST',
+            body: data.body,
+            queue: queue || 'task-operator',
+            timeout: 30000,
+            delay,
+          });
+        }
+      }
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('Task operator job failed', {
+        agentName,
+        duration: `${duration}ms`,
+        error: errorMessage,
+      });
+
+      // Re-enqueue with delay even on error if task operator is still enabled
+      if (this.queueManager && this.taskOperatorService.isTaskOperatorEnabled()) {
+        const delay = 10000; // 10 seconds delay on error
+        logger.info('Re-enqueueing task operator after error', {
+          agentName,
+          delay,
+          error: errorMessage,
+        });
+
+        await this.queueManager.addDelayedAgent({
+          name: agentName,
+          targetUrl: 'task-operator://internal',
+          method: 'POST',
+          body: data.body,
+          queue: queue || 'task-operator',
+          timeout: 30000,
+          delay,
+        });
+      }
+
+      // Don't throw - we want to re-enqueue even on errors
     }
   }
 }
