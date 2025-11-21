@@ -101,6 +101,8 @@ export class TaskOperatorService {
       const task = this.databaseService.getNextReadyTask();
 
       if (!task) {
+        // No task available, release lock
+        this.processingLock = false;
         return { processed: false };
       }
 
@@ -196,6 +198,9 @@ export class TaskOperatorService {
         // Mark task as ready again (status = 0) so it can be retried
         this.databaseService.updateTaskStatus(task.id, 0);
 
+        // Release lock on error (failed to send request)
+        this.processingLock = false;
+
         logger.error('Failed to send task to cursor-runner', {
           taskId: task.id,
           status: response.status,
@@ -217,8 +222,8 @@ export class TaskOperatorService {
 
       // Task is now being processed asynchronously
       // Callback will handle marking it complete or failed
-      // Release lock immediately since we're not waiting for completion
-      this.processingLock = false;
+      // DO NOT release lock here - keep it locked until callback arrives
+      // The lock will be released in handleCallback() after processing completes
 
       return {
         processed: true,
@@ -228,13 +233,12 @@ export class TaskOperatorService {
       logger.error('Failed to process next task', {
         error: error instanceof Error ? error.message : String(error),
       });
+      // Release lock on error (before sending request failed)
+      this.processingLock = false;
       return {
         processed: false,
         error: error instanceof Error ? error.message : String(error),
       };
-    } finally {
-      // Release lock in case of any error
-      this.processingLock = false;
     }
   }
 
@@ -291,6 +295,13 @@ export class TaskOperatorService {
     } finally {
       // Remove pending task
       this.pendingTasks.delete(requestId);
+      // Release lock after callback is processed - this allows the next task to start
+      this.processingLock = false;
+      logger.info('Lock released after callback processing', {
+        taskId,
+        requestId,
+        pendingTasksRemaining: this.pendingTasks.size,
+      });
     }
   }
 
