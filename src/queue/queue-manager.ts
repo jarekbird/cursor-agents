@@ -104,6 +104,7 @@ export class QueueManager {
       new Redis(redisUrl, {
         maxRetriesPerRequest: null, // Required by BullMQ - BullMQ manages its own retry logic
       });
+    // Create PromptProcessor with reference to this QueueManager for conditional re-enqueueing
     this.promptProcessor = promptProcessor || new PromptProcessor(this);
 
     // Use provided factories or default to actual BullMQ classes
@@ -178,6 +179,10 @@ export class QueueManager {
           this.queues.set(queueName, queue);
 
           // Recreate worker
+          // Task operator queue should have concurrency=1 to prevent duplicate processing
+          const defaultConcurrency = parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10);
+          const concurrency = queueName === 'task-operator' ? 1 : defaultConcurrency;
+
           const worker = this.workerFactory(
             queueName,
             async (job) => {
@@ -186,7 +191,7 @@ export class QueueManager {
             },
             {
               ...this.getConnectionOptions(),
-              concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
+              concurrency,
             }
           );
 
@@ -228,6 +233,10 @@ export class QueueManager {
       this.queues.set(name, queue);
 
       // Create worker for this queue
+      // Task operator queue should have concurrency=1 to prevent duplicate processing
+      const defaultConcurrency = parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10);
+      const concurrency = name === 'task-operator' ? 1 : defaultConcurrency;
+
       const worker = this.workerFactory(
         name,
         async (job) => {
@@ -236,7 +245,7 @@ export class QueueManager {
         },
         {
           ...this.getConnectionOptions(),
-          concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
+          concurrency,
         }
       );
 
@@ -365,6 +374,11 @@ export class QueueManager {
       // Create worker for this queue if it doesn't exist
       if (!this.workers.has(queueName)) {
         logger.info('Creating worker for queue', { queueName });
+
+        // Task operator queue should have concurrency=1 to prevent duplicate processing
+        const defaultConcurrency = parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10);
+        const concurrency = queueName === 'task-operator' ? 1 : defaultConcurrency;
+
         const worker = this.workerFactory(
           queueName,
           async (job) => {
@@ -373,7 +387,7 @@ export class QueueManager {
           },
           {
             ...this.getConnectionOptions(),
-            concurrency: parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10),
+            concurrency,
           }
         );
 
@@ -411,12 +425,9 @@ export class QueueManager {
   }
 
   /**
-   * Add a one-time agent that executes immediately or after a delay
+   * Add a one-time agent that executes immediately
    */
-  async addOneTimeAgent(
-    config: AgentConfig,
-    delay?: number
-  ): Promise<{ id: string; name: string }> {
+  async addOneTimeAgent(config: AgentConfig): Promise<{ id: string; name: string }> {
     const {
       name,
       targetUrl,
@@ -437,17 +448,12 @@ export class QueueManager {
       headers,
       body,
       timeout,
+      queue,
     };
 
-    const jobOptions: { jobId: string; delay?: number } = {
+    const job = await queueInstance.add(name, jobData, {
       jobId: `agent:${name}:${Date.now()}`,
-    };
-
-    if (delay && delay > 0) {
-      jobOptions.delay = delay;
-    }
-
-    const job = await queueInstance.add(name, jobData, jobOptions);
+    });
 
     logger.info('One-time agent added', {
       name,
@@ -455,7 +461,54 @@ export class QueueManager {
       jobId: job.id,
       targetUrl,
       method,
-      delay: delay ? `${delay}ms` : undefined,
+    });
+
+    return { id: job.id!, name: job.name! };
+  }
+
+  /**
+   * Add a delayed one-time agent that executes after a specified delay
+   * Used for conditional re-enqueueing based on response conditions
+   */
+  async addDelayedAgent(
+    config: AgentConfig & { delay: number }
+  ): Promise<{ id: string; name: string }> {
+    const {
+      name,
+      targetUrl,
+      method = 'POST',
+      headers = {},
+      body,
+      timeout = 30000,
+      queue = QueueManager.DEFAULT_QUEUE,
+      delay,
+    } = config;
+
+    const queueInstance = this.getOrCreateQueue(queue);
+
+    // Add delayed job
+    const jobData: AgentJobData = {
+      agentName: name,
+      targetUrl,
+      method,
+      headers,
+      body,
+      timeout,
+      queue,
+    };
+
+    const job = await queueInstance.add(name, jobData, {
+      jobId: `agent:${name}:${Date.now()}`,
+      delay, // BullMQ delay in milliseconds
+    });
+
+    logger.info('Delayed agent added', {
+      name,
+      queue,
+      jobId: job.id,
+      targetUrl,
+      method,
+      delay: `${delay}ms`,
     });
 
     return { id: job.id!, name: job.name! };
@@ -502,6 +555,7 @@ export class QueueManager {
       headers,
       body,
       timeout,
+      queue,
     };
 
     const job = await queueInstance.add(name, jobData, {
