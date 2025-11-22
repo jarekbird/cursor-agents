@@ -194,7 +194,7 @@ export class TaskOperatorService {
       const requestBody: any = {
         prompt: task.prompt,
         repository: null, // Use default repositories directory
-        maxIterations: 25,
+        maxIterations: 5,
         callbackUrl,
         id: requestId, // Include requestId in body
       };
@@ -349,7 +349,10 @@ export class TaskOperatorService {
     const { taskId } = pendingTask;
 
     try {
-      if (result.success !== false && !result.error) {
+      // Check if task completed successfully
+      // Note: cursor-runner can send success: true even with an error field (warnings/non-fatal errors)
+      // So we check success === true explicitly, not just success !== false
+      if (result.success === true) {
         // Task completed successfully
         const marked = this.databaseService.markTaskComplete(taskId);
         if (marked) {
@@ -357,17 +360,19 @@ export class TaskOperatorService {
             taskId,
             requestId,
             iterations: result.iterations,
+            hasErrorField: !!result.error, // Log if error field was present but task still succeeded
           });
         } else {
           logger.warn('Failed to mark task as complete', { taskId, requestId });
         }
       } else {
-        // Task failed
+        // Task failed (success is false or undefined)
         const errorMessage = result.error || 'Unknown error';
         logger.error('Task execution failed', {
           taskId,
           requestId,
           error: errorMessage,
+          success: result.success,
         });
 
         // Mark task as ready again (status = 0) so it can be retried
