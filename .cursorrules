@@ -1,0 +1,11 @@
+# cursor-agents Cursor Rules
+
+## Documentation Files
+
+**IMPORTANT: Do NOT create .md (Markdown) documentation files in this project.**
+- Do not create README.md files (except the main project README.md which already exists)
+- Do not create documentation files like `*.md` in any subdirectory
+- Do not create troubleshooting guides, diagnostic files, or other .md files
+- If documentation is needed, add it as code comments or in the main README.md
+- This rule applies to: cursor-runner, cursor-agents, jarek-va, and jarek-va-ui applications
+
