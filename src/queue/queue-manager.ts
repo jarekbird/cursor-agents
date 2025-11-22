@@ -186,7 +186,7 @@ export class QueueManager {
           const worker = this.workerFactory(
             queueName,
             async (job) => {
-              logger.info('Processing agent job', { jobId: job.id, name: job.name });
+              logger.debug('Processing agent job', { jobId: job.id, name: job.name });
               await this.promptProcessor.process(job.data as PromptJobData | AgentJobData);
             },
             {
@@ -196,7 +196,7 @@ export class QueueManager {
           );
 
           worker.on('completed', (job) => {
-            logger.info('Agent job completed', { jobId: job.id, name: job.name });
+            logger.debug('Agent job completed', { jobId: job.id, name: job.name });
           });
 
           worker.on('failed', (job, err) => {
@@ -392,7 +392,7 @@ export class QueueManager {
         );
 
         worker.on('completed', (job) => {
-          logger.info('Agent job completed', { jobId: job.id, name: job.name, queueName });
+          logger.debug('Agent job completed', { jobId: job.id, name: job.name, queueName });
         });
 
         worker.on('failed', (job, err) => {
@@ -569,7 +569,7 @@ export class QueueManager {
       delay, // BullMQ delay in milliseconds
     });
 
-    logger.info('Delayed agent added', {
+    logger.debug('Delayed agent added', {
       name,
       queue,
       jobId: job.id,

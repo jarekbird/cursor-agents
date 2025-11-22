@@ -53,7 +53,7 @@ export class PromptProcessor {
     const startTime = Date.now();
 
     // Log incoming request with full details
-    logger.info('Agent job request received', {
+    logger.debug('Agent job request received', {
       agentName,
       targetUrl,
       method,
@@ -213,7 +213,7 @@ export class PromptProcessor {
     const { agentName, queue } = data;
     const startTime = Date.now();
 
-    logger.info('Processing task operator job', { agentName, queue });
+    logger.debug('Processing task operator job', { agentName, queue });
 
     try {
       // Check if task operator is enabled
@@ -258,7 +258,7 @@ export class PromptProcessor {
               queue: queue || 'task-operator',
             });
           } else {
-            logger.info('Task operator re-enqueued successfully', {
+            logger.debug('Task operator re-enqueued successfully', {
               agentName,
               jobId: result.id,
               delay,
@@ -268,7 +268,7 @@ export class PromptProcessor {
       } else {
         // No task was processed - check the reason
         if (result.reason === 'lock_held') {
-          logger.info('Task operator skipped: lock held by another instance', {
+          logger.debug('Task operator skipped: lock held by another instance', {
             duration: `${duration}ms`,
           });
         } else {
@@ -282,7 +282,7 @@ export class PromptProcessor {
         // This allows time for new tasks to be added
         if (this.queueManager && this.taskOperatorService.isTaskOperatorEnabled()) {
           const delay = 5000; // 5 seconds delay before checking again
-          logger.info('Re-enqueueing task operator to check for new tasks', {
+          logger.debug('Re-enqueueing task operator to check for new tasks', {
             agentName,
             delay,
           });
@@ -303,7 +303,7 @@ export class PromptProcessor {
               queue: queue || 'task-operator',
             });
           } else {
-            logger.info('Task operator re-enqueued successfully', {
+            logger.debug('Task operator re-enqueued successfully', {
               agentName,
               jobId: result.id,
               delay,
@@ -323,7 +323,7 @@ export class PromptProcessor {
       // Re-enqueue with delay even on error if task operator is still enabled
       if (this.queueManager && this.taskOperatorService.isTaskOperatorEnabled()) {
         const delay = 10000; // 10 seconds delay on error
-        logger.info('Re-enqueueing task operator after error', {
+        logger.debug('Re-enqueueing task operator after error', {
           agentName,
           delay,
           error: errorMessage,
@@ -345,7 +345,7 @@ export class PromptProcessor {
             queue: queue || 'task-operator',
           });
         } else {
-          logger.info('Task operator re-enqueued successfully after error', {
+          logger.debug('Task operator re-enqueued successfully after error', {
             agentName,
             jobId: result.id,
             delay,
