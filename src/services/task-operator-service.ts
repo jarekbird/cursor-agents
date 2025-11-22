@@ -298,7 +298,51 @@ export class TaskOperatorService {
     const pendingTask = this.pendingTasks.get(requestId);
 
     if (!pendingTask) {
-      logger.warn('Callback received for unknown requestId', { requestId });
+      logger.warn('Callback received for unknown requestId', {
+        requestId,
+        pendingTaskCount: this.pendingTasks.size,
+        pendingRequestIds: Array.from(this.pendingTasks.keys()),
+      });
+
+      // Check if the lock is from a previous process instance
+      // Lock format: "processId-timestamp-random"
+      const lockValue = await this.redis.get(this.LOCK_KEY).catch(() => null);
+      let shouldClearLock = false;
+
+      if (lockValue) {
+        const lockPid = lockValue.split('-')[0];
+        const currentPid = String(process.pid);
+
+        if (lockPid !== currentPid) {
+          logger.info('Lock is from different process instance, clearing it', {
+            requestId,
+            lockPid,
+            currentPid,
+            lockValue,
+          });
+          shouldClearLock = true;
+        } else if (this.pendingTasks.size === 0) {
+          // Lock is from this process but no pending tasks - callback must be for cleaned up task
+          logger.info('No pending tasks remaining, clearing lock after unknown callback', {
+            requestId,
+            lockValue,
+          });
+          shouldClearLock = true;
+        }
+      } else {
+        // Lock doesn't exist, nothing to clear
+        logger.info('Lock does not exist, nothing to clear', { requestId });
+      }
+
+      if (shouldClearLock) {
+        await this.clearLock();
+      } else {
+        logger.info('Not clearing lock - pending tasks exist or lock is from current process', {
+          requestId,
+          pendingTaskCount: this.pendingTasks.size,
+          lockExists: !!lockValue,
+        });
+      }
       return;
     }
 
