@@ -114,7 +114,9 @@ export class TaskOperatorService {
     );
 
     if (lockAcquired !== 'OK') {
-      logger.debug('Task operator is already processing a task (Redis lock held), skipping');
+      logger.info('Task operator skipping: Redis lock already held by another instance', {
+        lockKey: this.LOCK_KEY,
+      });
       return { processed: false };
     }
 
