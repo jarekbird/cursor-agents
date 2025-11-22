@@ -158,6 +158,36 @@ python disable_task_operator.py
 2. Removes any existing task operator agents
 3. The task operator will stop re-enqueueing after processing current tasks
 
+### clear_task_operator_lock.py
+Forcefully clears the Redis lock used by the task operator.
+This is useful when the lock is stuck (e.g., after a crash) and preventing
+the task operator from processing new tasks.
+
+**WARNING:** Only use this if you're sure no task is currently being processed,
+as clearing the lock while a task is in progress could cause issues.
+
+**Usage:**
+```bash
+python clear_task_operator_lock.py
+```
+
+**Examples:**
+```bash
+# Clear the task operator Redis lock
+python clear_task_operator_lock.py
+```
+
+**How it works:**
+1. Makes a DELETE request to `/task-operator/lock` endpoint
+2. Forcefully deletes the Redis lock key (`task_operator:lock`)
+3. Returns whether the lock was present and cleared
+
+**When to use:**
+- The task operator is stuck and not processing tasks
+- You see "Redis lock already held" messages repeatedly
+- A previous instance crashed and left a stale lock
+- You need to manually reset the task operator state
+
 ## Queue Management
 
 Agents can be organized into queues to avoid queue bloat and better organize your agents. By default, agents are created in the `"default"` queue if no queue is specified.

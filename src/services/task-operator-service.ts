@@ -353,6 +353,30 @@ export class TaskOperatorService {
   }
 
   /**
+   * Forcefully clear the Redis lock (for administrative use)
+   * This deletes the lock regardless of who owns it
+   * Use with caution - only when you need to clear a stale lock
+   */
+  async clearLock(): Promise<boolean> {
+    try {
+      const deleted = await this.redis.del(this.LOCK_KEY);
+      if (deleted === 1) {
+        logger.info('Redis lock forcefully cleared', { lockKey: this.LOCK_KEY });
+        return true;
+      } else {
+        logger.info('Redis lock does not exist (already cleared)', { lockKey: this.LOCK_KEY });
+        return false;
+      }
+    } catch (error) {
+      logger.error('Error clearing Redis lock', {
+        error: error instanceof Error ? error.message : String(error),
+        lockKey: this.LOCK_KEY,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Release the Redis lock atomically
    * Only releases if the lock value matches (ensures we only release our own lock)
    */

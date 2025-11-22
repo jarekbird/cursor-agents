@@ -371,6 +371,31 @@ export class CursorAgentsApp {
       }
     });
 
+    // Clear task operator Redis lock (forcefully delete the lock)
+    this.app.delete('/task-operator/lock', async (_req: Request, res: Response): Promise<void> => {
+      try {
+        const { TaskOperatorService } = await import('./services/task-operator-service.js');
+        const taskOperatorService = new TaskOperatorService();
+
+        const cleared = await taskOperatorService.clearLock();
+
+        logger.info('Task operator lock cleared via API', {
+          lockCleared: cleared,
+        });
+
+        res.json({
+          success: true,
+          message: cleared
+            ? 'Task operator Redis lock cleared successfully'
+            : 'Task operator Redis lock was not present',
+          lockCleared: cleared,
+        });
+      } catch (error) {
+        logger.error('Failed to clear task operator lock', { error });
+        res.status(500).json({ error: 'Failed to clear task operator lock' });
+      }
+    });
+
     // Task operator callback endpoint (receives callbacks from cursor-runner)
     this.app.post('/task-operator/callback', async (req: Request, res: Response): Promise<void> => {
       try {
