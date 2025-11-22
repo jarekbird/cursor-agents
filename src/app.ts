@@ -40,7 +40,12 @@ export class CursorAgentsApp {
     this.app.use('/admin/queues', this.serverAdapter.getRouter());
 
     // Health check endpoint
-    this.app.get('/health', (_req: Request, res: Response) => {
+    this.app.get('/health', (req: Request, res: Response) => {
+      logger.info('Health check requested', {
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
+        service: 'cursor-agents',
+      });
       res.json({
         status: 'ok',
         service: 'cursor-agents',
