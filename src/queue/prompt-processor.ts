@@ -253,7 +253,16 @@ export class PromptProcessor {
           });
 
           if (!result) {
-            logger.debug('Task operator job already exists, skipped re-enqueueing');
+            logger.warn('Task operator re-enqueue skipped: job already exists (waiting/delayed)', {
+              agentName,
+              queue: queue || 'task-operator',
+            });
+          } else {
+            logger.info('Task operator re-enqueued successfully', {
+              agentName,
+              jobId: result.id,
+              delay,
+            });
           }
         }
       } else {
@@ -282,7 +291,16 @@ export class PromptProcessor {
           });
 
           if (!result) {
-            logger.debug('Task operator job already exists, skipped re-enqueueing');
+            logger.warn('Task operator re-enqueue skipped: job already exists (waiting/delayed)', {
+              agentName,
+              queue: queue || 'task-operator',
+            });
+          } else {
+            logger.info('Task operator re-enqueued successfully', {
+              agentName,
+              jobId: result.id,
+              delay,
+            });
           }
         }
       }
@@ -315,7 +333,16 @@ export class PromptProcessor {
         });
 
         if (!result) {
-          logger.debug('Task operator job already exists, skipped re-enqueueing');
+          logger.warn('Task operator re-enqueue skipped: job already exists (waiting/delayed)', {
+            agentName,
+            queue: queue || 'task-operator',
+          });
+        } else {
+          logger.info('Task operator re-enqueued successfully after error', {
+            agentName,
+            jobId: result.id,
+            delay,
+          });
         }
       }
 

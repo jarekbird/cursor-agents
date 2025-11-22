@@ -470,11 +470,13 @@ export class QueueManager {
    * Check if there are existing jobs (waiting, active, or delayed) for a given agent name
    * @param name - Agent name to check
    * @param queueName - Queue name to check (defaults to 'default')
+   * @param excludeActive - If true, exclude active jobs from the check (useful when re-enqueueing from within an active job)
    * @returns true if there are existing jobs, false otherwise
    */
   async hasExistingJobs(
     name: string,
-    queueName: string = QueueManager.DEFAULT_QUEUE
+    queueName: string = QueueManager.DEFAULT_QUEUE,
+    excludeActive: boolean = false
   ): Promise<boolean> {
     const queueInstance = this.queues.get(queueName);
     if (!queueInstance) {
@@ -489,15 +491,18 @@ export class QueueManager {
       ]);
 
       // Check if any of these jobs match the agent name
-      const allJobs = [...waiting, ...active, ...delayed];
-      const hasMatchingJob = allJobs.some((job) => job.name === name);
+      // Exclude active jobs if requested (to avoid race condition when re-enqueueing from within active job)
+      const jobsToCheck = excludeActive
+        ? [...waiting, ...delayed]
+        : [...waiting, ...active, ...delayed];
+      const hasMatchingJob = jobsToCheck.some((job) => job.name === name);
 
       if (hasMatchingJob) {
         logger.debug('Found existing jobs for agent', {
           name,
           queue: queueName,
           waiting: waiting.filter((j) => j.name === name).length,
-          active: active.filter((j) => j.name === name).length,
+          active: excludeActive ? 'excluded' : active.filter((j) => j.name === name).length,
           delayed: delayed.filter((j) => j.name === name).length,
         });
       }
@@ -534,8 +539,9 @@ export class QueueManager {
 
     // For task-operator, check if there's already a pending job
     // This prevents multiple concurrent task operator jobs
+    // Exclude active jobs to avoid race condition when re-enqueueing from within active job
     if (name === 'task-operator') {
-      const hasExisting = await this.hasExistingJobs(name, queue);
+      const hasExisting = await this.hasExistingJobs(name, queue, true);
       if (hasExisting) {
         logger.debug('Skipping re-enqueue: task-operator job already exists', {
           name,
