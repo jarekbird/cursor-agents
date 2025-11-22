@@ -6,6 +6,7 @@ interface ProcessNextTaskResult {
   processed: boolean;
   taskId?: number;
   error?: string;
+  reason?: 'lock_held' | 'no_tasks' | 'error'; // Reason why processing didn't happen
 }
 
 interface PendingTask {
@@ -114,10 +115,18 @@ export class TaskOperatorService {
     );
 
     if (lockAcquired !== 'OK') {
+      // Get lock details for logging
+      const [lockValue, ttl] = await Promise.all([
+        this.redis.get(this.LOCK_KEY).catch(() => null),
+        this.redis.ttl(this.LOCK_KEY).catch(() => -1),
+      ]);
+
       logger.info('Task operator skipping: Redis lock already held by another instance', {
         lockKey: this.LOCK_KEY,
+        lockHolder: lockValue || 'unknown',
+        ttlSeconds: ttl >= 0 ? ttl : 'unknown',
       });
-      return { processed: false };
+      return { processed: false, reason: 'lock_held' };
     }
 
     logger.debug('Redis lock acquired', { lockValue: this.lockValue });
@@ -129,7 +138,7 @@ export class TaskOperatorService {
       if (!task) {
         // No task available, release lock
         await this.releaseLock();
-        return { processed: false };
+        return { processed: false, reason: 'no_tasks' };
       }
 
       logger.info('Processing task', {
@@ -237,6 +246,7 @@ export class TaskOperatorService {
           processed: false,
           taskId: task.id,
           error: `Cursor runner returned ${response.status}: ${responseText.substring(0, 200)}`,
+          reason: 'error',
         };
       }
 
@@ -265,6 +275,7 @@ export class TaskOperatorService {
       return {
         processed: false,
         error: error instanceof Error ? error.message : String(error),
+        reason: 'error',
       };
     }
   }

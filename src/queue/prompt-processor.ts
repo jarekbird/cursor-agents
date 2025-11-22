@@ -266,10 +266,17 @@ export class PromptProcessor {
           }
         }
       } else {
-        // No task was processed (no ready tasks available)
-        logger.info('No ready tasks to process', {
-          duration: `${duration}ms`,
-        });
+        // No task was processed - check the reason
+        if (result.reason === 'lock_held') {
+          logger.info('Task operator skipped: lock held by another instance', {
+            duration: `${duration}ms`,
+          });
+        } else {
+          logger.info('No ready tasks to process', {
+            duration: `${duration}ms`,
+            reason: result.reason || 'unknown',
+          });
+        }
 
         // Re-enqueue with a longer delay if task operator is still enabled
         // This allows time for new tasks to be added
