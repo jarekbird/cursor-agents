@@ -22,14 +22,6 @@ export class CursorAgentsApp {
 
   private setupMiddleware(): void {
     this.app.use(express.json());
-    this.app.use((req, _res, next) => {
-      logger.info('HTTP Request', {
-        method: req.method,
-        path: req.path,
-        ip: req.ip,
-      });
-      next();
-    });
   }
 
   private setupRoutes(): void {
@@ -368,6 +360,31 @@ export class CursorAgentsApp {
       } catch (error) {
         logger.error('Failed to disable task operator', { error });
         res.status(500).json({ error: 'Failed to disable task operator' });
+      }
+    });
+
+    // Check task operator Redis lock status
+    this.app.get('/task-operator/lock', async (_req: Request, res: Response): Promise<void> => {
+      try {
+        const { TaskOperatorService } = await import('./services/task-operator-service.js');
+        const taskOperatorService = new TaskOperatorService();
+
+        const isLocked = await taskOperatorService.isProcessing();
+
+        logger.info('Task operator lock status checked via API', {
+          isLocked,
+        });
+
+        res.json({
+          success: true,
+          isLocked,
+          message: isLocked
+            ? 'Task operator Redis lock is currently held'
+            : 'Task operator Redis lock is not held',
+        });
+      } catch (error) {
+        logger.error('Failed to check task operator lock status', { error });
+        res.status(500).json({ error: 'Failed to check task operator lock status' });
       }
     });
 

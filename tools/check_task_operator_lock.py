@@ -1,24 +1,45 @@
 #!/usr/bin/env python3
 """
-Enable Task Operator Tool
+Check Task Operator Lock Tool
 
-Enables the task operator agent, which automatically processes tasks from the database.
-The task operator will continuously check for incomplete tasks and send them to cursor-runner
-until disabled.
+Checks whether the task operator currently has a Redis lock.
+This is useful to determine if the task operator is currently processing a task.
 
 Usage:
-    python enable_task_operator.py [--queue <queue-name>]
+    python check_task_operator_lock.py
 
-Optional Arguments:
-    --queue, -q              Queue name to use for the task operator (default: "task-operator")
-    --help, -h               Show this help message
+Output:
+    Returns a JSON object containing:
+    - success: Whether the request was successful
+    - isLocked: Whether the lock is currently held (true/false)
+    - message: Human-readable message about the lock status
 
-Examples:
-    # Enable task operator with default queue
-    python enable_task_operator.py
+Example:
+    python check_task_operator_lock.py
 
-    # Enable task operator in a specific queue
-    python enable_task_operator.py --queue "task-processing"
+Example Output (lock held):
+    {
+      "success": true,
+      "isLocked": true,
+      "message": "Task operator Redis lock is currently held"
+    }
+
+Example Output (lock not held):
+    {
+      "success": true,
+      "isLocked": false,
+      "message": "Task operator Redis lock is not held"
+    }
+
+Error Output:
+    If there's an error checking the lock, returns:
+    {
+      "error": "Error message"
+    }
+
+Note:
+    This script checks the lock status without modifying it.
+    To clear a lock, use clear_task_operator_lock.py instead.
 """
 
 import argparse
@@ -30,17 +51,11 @@ import urllib.request
 import urllib.error
 
 
-def make_request(url: str, method: str = 'POST', data: Dict[str, Any] = None) -> Dict[str, Any]:
+def make_request(url: str, method: str = 'GET') -> Dict[str, Any]:
     """Make HTTP request to cursor-agents API."""
     try:
-        if data:
-            data_bytes = json.dumps(data).encode('utf-8')
-        else:
-            data_bytes = None
-
         req = urllib.request.Request(
             url,
-            data=data_bytes,
             method=method,
             headers={'Content-Type': 'application/json'}
         )
@@ -64,45 +79,28 @@ def make_request(url: str, method: str = 'POST', data: Dict[str, Any] = None) ->
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(
-        description="Enable the task operator agent",
+        description="Check the task operator Redis lock status",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
-    )
-
-    parser.add_argument(
-        '--queue', '-q',
-        default='task-operator',
-        help='Queue name to use for the task operator (default: "task-operator")'
     )
 
     args = parser.parse_args()
 
     # Get API URL from environment or use default
     api_url = os.getenv('CURSOR_AGENTS_URL', 'http://cursor-agents:3002')
-    url = f"{api_url}/task-operator"
+    url = f"{api_url}/task-operator/lock"
 
-    # Build request body
-    body = {}
-    if args.queue:
-        body['queue'] = args.queue
-
-    # Make HTTP request to enable task operator
-    result = make_request(url, method='POST', data=body)
+    # Make HTTP request to check the lock status
+    result = make_request(url, method='GET')
 
     if 'error' in result:
         print(f"Error: {result['error']}", file=sys.stderr)
         sys.exit(1)
 
-    # Print success message
+    # Print result
     print(json.dumps(result, indent=2, default=str))
 
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
 

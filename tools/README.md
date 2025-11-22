@@ -158,6 +158,56 @@ python disable_task_operator.py
 2. Removes any existing task operator agents
 3. The task operator will stop re-enqueueing after processing current tasks
 
+### check_task_operator_lock.py
+Checks whether the task operator currently has a Redis lock.
+This is useful to determine if the task operator is currently processing a task.
+
+**Usage:**
+```bash
+python check_task_operator_lock.py
+```
+
+**Examples:**
+```bash
+# Check if task operator lock is currently held
+python check_task_operator_lock.py
+```
+
+**Output:**
+Returns a JSON object containing:
+- `success`: Whether the request was successful
+- `isLocked`: Whether the lock is currently held (true/false)
+- `message`: Human-readable message about the lock status
+
+**Example Output (lock held):**
+```json
+{
+  "success": true,
+  "isLocked": true,
+  "message": "Task operator Redis lock is currently held"
+}
+```
+
+**Example Output (lock not held):**
+```json
+{
+  "success": true,
+  "isLocked": false,
+  "message": "Task operator Redis lock is not held"
+}
+```
+
+**How it works:**
+1. Makes a GET request to `/task-operator/lock` endpoint
+2. Checks if the Redis lock key (`task_operator:lock`) exists
+3. Returns the lock status without modifying it
+
+**When to use:**
+- Check if task operator is currently processing a task
+- Verify lock status before clearing it
+- Debug task operator lock issues
+- Monitor task operator activity
+
 ### clear_task_operator_lock.py
 Forcefully clears the Redis lock used by the task operator.
 This is useful when the lock is stuck (e.g., after a crash) and preventing
