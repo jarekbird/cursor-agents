@@ -242,7 +242,7 @@ export class PromptProcessor {
             delay,
           });
 
-          await this.queueManager.addDelayedAgent({
+          const result = await this.queueManager.addDelayedAgent({
             name: agentName,
             targetUrl: 'task-operator://internal',
             method: 'POST',
@@ -251,6 +251,10 @@ export class PromptProcessor {
             timeout: 30000,
             delay,
           });
+
+          if (!result) {
+            logger.debug('Task operator job already exists, skipped re-enqueueing');
+          }
         }
       } else {
         // No task was processed (no ready tasks available)
@@ -267,7 +271,7 @@ export class PromptProcessor {
             delay,
           });
 
-          await this.queueManager.addDelayedAgent({
+          const result = await this.queueManager.addDelayedAgent({
             name: agentName,
             targetUrl: 'task-operator://internal',
             method: 'POST',
@@ -276,6 +280,10 @@ export class PromptProcessor {
             timeout: 30000,
             delay,
           });
+
+          if (!result) {
+            logger.debug('Task operator job already exists, skipped re-enqueueing');
+          }
         }
       }
     } catch (error) {
@@ -296,7 +304,7 @@ export class PromptProcessor {
           error: errorMessage,
         });
 
-        await this.queueManager.addDelayedAgent({
+        const result = await this.queueManager.addDelayedAgent({
           name: agentName,
           targetUrl: 'task-operator://internal',
           method: 'POST',
@@ -305,6 +313,10 @@ export class PromptProcessor {
           timeout: 30000,
           delay,
         });
+
+        if (!result) {
+          logger.debug('Task operator job already exists, skipped re-enqueueing');
+        }
       }
 
       // Don't throw - we want to re-enqueue even on errors

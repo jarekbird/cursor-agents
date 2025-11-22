@@ -1,3 +1,4 @@
+import { Redis } from 'ioredis';
 import { logger } from '../logger.js';
 import { DatabaseService } from './database-service.js';
 
@@ -19,11 +20,23 @@ interface PendingTask {
  */
 export class TaskOperatorService {
   private databaseService: DatabaseService;
-  private processingLock = false; // Mutex to ensure only one task processes at a time
+  private redis: Redis;
   private pendingTasks = new Map<string, PendingTask>(); // requestId -> PendingTask
+  private readonly TASK_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour timeout for tasks
+  private readonly LOCK_KEY = 'task_operator:lock'; // Redis lock key
+  private readonly LOCK_TTL_SECONDS = 3600; // 1 hour lock TTL (auto-expires if process crashes)
+  private readonly lockValue: string; // Unique value for this instance to ensure we only release our own lock
 
-  constructor() {
+  constructor(redis?: Redis) {
     this.databaseService = new DatabaseService();
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379/0';
+    this.redis =
+      redis ||
+      new Redis(redisUrl, {
+        maxRetriesPerRequest: null, // Required by BullMQ - BullMQ manages its own retry logic
+      });
+    // Generate unique lock value for this instance (process ID + timestamp)
+    this.lockValue = `${process.pid}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
@@ -84,25 +97,36 @@ export class TaskOperatorService {
   /**
    * Process the next ready task from the database
    * Sends it to cursor-runner for execution (async with callback)
-   * Only processes one task at a time (mutex lock)
+   * Only processes one task at a time (Redis-based distributed lock)
    */
   async processNextTask(): Promise<ProcessNextTaskResult> {
-    // Check if already processing (mutex lock)
-    if (this.processingLock) {
-      logger.debug('Task operator is already processing a task, skipping');
+    // Clean up any stale pending tasks before checking lock
+    await this.cleanupStaleTasks();
+
+    // Try to acquire Redis lock (atomic operation: SET key value NX EX ttl)
+    // NX = only set if not exists, EX = set expiration in seconds
+    const lockAcquired = await this.redis.set(
+      this.LOCK_KEY,
+      this.lockValue,
+      'EX',
+      this.LOCK_TTL_SECONDS,
+      'NX'
+    );
+
+    if (lockAcquired !== 'OK') {
+      logger.debug('Task operator is already processing a task (Redis lock held), skipping');
       return { processed: false };
     }
 
-    try {
-      // Acquire lock
-      this.processingLock = true;
+    logger.debug('Redis lock acquired', { lockValue: this.lockValue });
 
+    try {
       // Get the next ready task
       const task = this.databaseService.getNextReadyTask();
 
       if (!task) {
         // No task available, release lock
-        this.processingLock = false;
+        await this.releaseLock();
         return { processed: false };
       }
 
@@ -199,7 +223,7 @@ export class TaskOperatorService {
         this.databaseService.updateTaskStatus(task.id, 0);
 
         // Release lock on error (failed to send request)
-        this.processingLock = false;
+        await this.releaseLock();
 
         logger.error('Failed to send task to cursor-runner', {
           taskId: task.id,
@@ -223,7 +247,8 @@ export class TaskOperatorService {
       // Task is now being processed asynchronously
       // Callback will handle marking it complete or failed
       // DO NOT release lock here - keep it locked until callback arrives
-      // The lock will be released in handleCallback() after processing completes
+      // The Redis lock will be released in handleCallback() after processing completes
+      // Note: Lock has TTL so it will auto-expire if process crashes
 
       return {
         processed: true,
@@ -234,7 +259,7 @@ export class TaskOperatorService {
         error: error instanceof Error ? error.message : String(error),
       });
       // Release lock on error (before sending request failed)
-      this.processingLock = false;
+      await this.releaseLock();
       return {
         processed: false,
         error: error instanceof Error ? error.message : String(error),
@@ -295,8 +320,8 @@ export class TaskOperatorService {
     } finally {
       // Remove pending task
       this.pendingTasks.delete(requestId);
-      // Release lock after callback is processed - this allows the next task to start
-      this.processingLock = false;
+      // Release Redis lock after callback is processed - this allows the next task to start
+      await this.releaseLock();
       logger.info('Lock released after callback processing', {
         taskId,
         requestId,
@@ -307,9 +332,42 @@ export class TaskOperatorService {
 
   /**
    * Check if task operator is currently processing a task
+   * Uses Redis lock to check across all instances
    */
-  isProcessing(): boolean {
-    return this.processingLock;
+  async isProcessing(): Promise<boolean> {
+    const exists = await this.redis.exists(this.LOCK_KEY);
+    return exists === 1;
+  }
+
+  /**
+   * Release the Redis lock atomically
+   * Only releases if the lock value matches (ensures we only release our own lock)
+   */
+  private async releaseLock(): Promise<void> {
+    try {
+      // Use Lua script for atomic check-and-delete
+      // This ensures we only delete the lock if we own it
+      const script = `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("del", KEYS[1])
+        else
+          return 0
+        end
+      `;
+      const result = await this.redis.eval(script, 1, this.LOCK_KEY, this.lockValue);
+      if (result === 1) {
+        logger.debug('Redis lock released successfully', { lockValue: this.lockValue });
+      } else {
+        logger.warn('Failed to release Redis lock - lock value mismatch or lock already expired', {
+          lockValue: this.lockValue,
+        });
+      }
+    } catch (error) {
+      logger.error('Error releasing Redis lock', {
+        error: error instanceof Error ? error.message : String(error),
+        lockValue: this.lockValue,
+      });
+    }
   }
 
   /**
@@ -317,5 +375,52 @@ export class TaskOperatorService {
    */
   getPendingTaskCount(): number {
     return this.pendingTasks.size;
+  }
+
+  /**
+   * Clean up stale pending tasks that have exceeded the timeout
+   * This prevents the lock from being held forever if a callback never arrives
+   */
+  private async cleanupStaleTasks(): Promise<void> {
+    const now = Date.now();
+    const staleTasks: string[] = [];
+
+    for (const [requestId, pendingTask] of this.pendingTasks.entries()) {
+      const age = now - pendingTask.timestamp;
+      if (age > this.TASK_TIMEOUT_MS) {
+        staleTasks.push(requestId);
+      }
+    }
+
+    if (staleTasks.length > 0) {
+      logger.warn('Cleaning up stale pending tasks', {
+        count: staleTasks.length,
+        requestIds: staleTasks,
+      });
+
+      for (const requestId of staleTasks) {
+        const pendingTask = this.pendingTasks.get(requestId);
+        if (pendingTask) {
+          // Mark task as ready again (status = 0) so it can be retried
+          this.databaseService.updateTaskStatus(pendingTask.taskId, 0);
+          this.pendingTasks.delete(requestId);
+
+          logger.warn('Stale task cleaned up and marked for retry', {
+            taskId: pendingTask.taskId,
+            requestId,
+            age: `${Math.round((now - pendingTask.timestamp) / 1000)}s`,
+          });
+        }
+      }
+
+      // If we cleaned up all pending tasks and lock is still held, release it
+      if (this.pendingTasks.size === 0) {
+        const lockExists = await this.redis.exists(this.LOCK_KEY);
+        if (lockExists === 1) {
+          logger.warn('Releasing stale processing lock after cleaning up all pending tasks');
+          await this.releaseLock();
+        }
+      }
+    }
   }
 }

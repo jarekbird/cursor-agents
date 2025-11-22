@@ -467,12 +467,60 @@ export class QueueManager {
   }
 
   /**
+   * Check if there are existing jobs (waiting, active, or delayed) for a given agent name
+   * @param name - Agent name to check
+   * @param queueName - Queue name to check (defaults to 'default')
+   * @returns true if there are existing jobs, false otherwise
+   */
+  async hasExistingJobs(
+    name: string,
+    queueName: string = QueueManager.DEFAULT_QUEUE
+  ): Promise<boolean> {
+    const queueInstance = this.queues.get(queueName);
+    if (!queueInstance) {
+      return false;
+    }
+
+    try {
+      const [waiting, active, delayed] = await Promise.all([
+        queueInstance.getWaiting(0, 100),
+        queueInstance.getActive(0, 100),
+        queueInstance.getDelayed(0, 100),
+      ]);
+
+      // Check if any of these jobs match the agent name
+      const allJobs = [...waiting, ...active, ...delayed];
+      const hasMatchingJob = allJobs.some((job) => job.name === name);
+
+      if (hasMatchingJob) {
+        logger.debug('Found existing jobs for agent', {
+          name,
+          queue: queueName,
+          waiting: waiting.filter((j) => j.name === name).length,
+          active: active.filter((j) => j.name === name).length,
+          delayed: delayed.filter((j) => j.name === name).length,
+        });
+      }
+
+      return hasMatchingJob;
+    } catch (error) {
+      logger.error('Error checking for existing jobs', {
+        name,
+        queue: queueName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // On error, assume no existing jobs to be safe
+      return false;
+    }
+  }
+
+  /**
    * Add a delayed one-time agent that executes after a specified delay
    * Used for conditional re-enqueueing based on response conditions
    */
   async addDelayedAgent(
     config: AgentConfig & { delay: number }
-  ): Promise<{ id: string; name: string }> {
+  ): Promise<{ id: string; name: string } | null> {
     const {
       name,
       targetUrl,
@@ -483,6 +531,19 @@ export class QueueManager {
       queue = QueueManager.DEFAULT_QUEUE,
       delay,
     } = config;
+
+    // For task-operator, check if there's already a pending job
+    // This prevents multiple concurrent task operator jobs
+    if (name === 'task-operator') {
+      const hasExisting = await this.hasExistingJobs(name, queue);
+      if (hasExisting) {
+        logger.debug('Skipping re-enqueue: task-operator job already exists', {
+          name,
+          queue,
+        });
+        return null;
+      }
+    }
 
     const queueInstance = this.getOrCreateQueue(queue);
 
