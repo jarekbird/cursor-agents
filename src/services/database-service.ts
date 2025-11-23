@@ -198,6 +198,28 @@ export class DatabaseService {
   }
 
   /**
+   * Get task status by ID
+   * @param taskId - Task ID
+   * @returns Task status or null if task not found
+   */
+  getTaskStatus(taskId: number): number | null {
+    try {
+      const db = this.getDatabase();
+      const row = db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as
+        | { status: number }
+        | undefined;
+
+      return row?.status ?? null;
+    } catch (error) {
+      logger.error('Failed to get task status', {
+        taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
    * Mark a task as complete (status = 1)
    */
   markTaskComplete(taskId: number): boolean {

@@ -349,10 +349,27 @@ export class TaskOperatorService {
     const { taskId } = pendingTask;
 
     try {
+      // Log the full callback result for debugging
+      logger.info('Processing callback for pending task', {
+        taskId,
+        requestId,
+        success: result.success,
+        successType: typeof result.success,
+        hasError: !!result.error,
+        hasOutput: !!result.output,
+        iterations: result.iterations,
+        fullResult: JSON.stringify(result),
+      });
+
       // Check if task completed successfully
       // Note: cursor-runner can send success: true even with an error field (warnings/non-fatal errors)
       // So we check success === true explicitly, not just success !== false
-      if (result.success === true) {
+      // Also handle string "true" as a fallback (shouldn't happen but be defensive)
+      const isSuccess =
+        result.success === true ||
+        (typeof result.success === 'string' && result.success === 'true');
+
+      if (isSuccess) {
         // Task completed successfully
         const marked = this.databaseService.markTaskComplete(taskId);
         if (marked) {
@@ -363,7 +380,11 @@ export class TaskOperatorService {
             hasErrorField: !!result.error, // Log if error field was present but task still succeeded
           });
         } else {
-          logger.warn('Failed to mark task as complete', { taskId, requestId });
+          logger.error('Failed to mark task as complete - database update returned false', {
+            taskId,
+            requestId,
+            iterations: result.iterations,
+          });
         }
       } else {
         // Task failed (success is false or undefined)
@@ -373,6 +394,7 @@ export class TaskOperatorService {
           requestId,
           error: errorMessage,
           success: result.success,
+          successType: typeof result.success,
         });
 
         // Mark task as ready again (status = 0) so it can be retried
@@ -466,6 +488,7 @@ export class TaskOperatorService {
   /**
    * Clean up stale pending tasks that have exceeded the timeout
    * This prevents the lock from being held forever if a callback never arrives
+   * Only resets tasks that are actually still in_progress (status 4) in the database
    */
   private async cleanupStaleTasks(): Promise<void> {
     const now = Date.now();
@@ -487,15 +510,41 @@ export class TaskOperatorService {
       for (const requestId of staleTasks) {
         const pendingTask = this.pendingTasks.get(requestId);
         if (pendingTask) {
-          // Mark task as ready again (status = 0) so it can be retried
-          this.databaseService.updateTaskStatus(pendingTask.taskId, 0);
-          this.pendingTasks.delete(requestId);
+          // Check the actual database status before resetting
+          // Only reset if the task is still in_progress (status 4)
+          // If it's already complete (status 1), don't reset it
+          try {
+            const taskStatus = this.databaseService.getTaskStatus(pendingTask.taskId);
 
-          logger.warn('Stale task cleaned up and marked for retry', {
-            taskId: pendingTask.taskId,
-            requestId,
-            age: `${Math.round((now - pendingTask.timestamp) / 1000)}s`,
-          });
+            if (taskStatus === DatabaseService.STATUS_IN_PROGRESS) {
+              // Task is still in_progress, so it's truly stale - reset to ready
+              this.databaseService.updateTaskStatus(pendingTask.taskId, 0);
+              logger.warn('Stale task cleaned up and marked for retry', {
+                taskId: pendingTask.taskId,
+                requestId,
+                age: `${Math.round((now - pendingTask.timestamp) / 1000)}s`,
+                previousStatus: taskStatus,
+              });
+            } else {
+              // Task is already complete or in another state - don't reset it
+              logger.info('Skipping stale task cleanup - task already in final state', {
+                taskId: pendingTask.taskId,
+                requestId,
+                currentStatus: taskStatus,
+                age: `${Math.round((now - pendingTask.timestamp) / 1000)}s`,
+              });
+            }
+          } catch (error) {
+            logger.error('Error checking task status during stale cleanup', {
+              taskId: pendingTask.taskId,
+              requestId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            // On error, still reset to ready to be safe (but log the error)
+            this.databaseService.updateTaskStatus(pendingTask.taskId, 0);
+          }
+
+          this.pendingTasks.delete(requestId);
         }
       }
 

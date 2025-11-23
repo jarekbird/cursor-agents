@@ -461,8 +461,12 @@ export class CursorAgentsApp {
         logger.info('Task operator callback received', {
           requestId,
           success: body.success,
+          successType: typeof body.success,
           hasError: !!body.error,
           hasOutput: !!body.output,
+          iterations: body.iterations,
+          maxIterations: body.maxIterations,
+          fullBody: JSON.stringify(body),
         });
 
         // Get TaskOperatorService instance to handle the callback
