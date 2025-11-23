@@ -36,7 +36,7 @@ export class PromptProcessor {
 
   constructor(queueManager?: QueueManager) {
     this.queueManager = queueManager;
-    this.taskOperatorService = new TaskOperatorService();
+    this.taskOperatorService = TaskOperatorService.getInstance();
   }
 
   async process(data: PromptJobData | AgentJobData): Promise<void> {

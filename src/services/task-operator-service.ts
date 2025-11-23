@@ -28,6 +28,9 @@ export class TaskOperatorService {
   private readonly LOCK_TTL_SECONDS = 3600; // 1 hour lock TTL (auto-expires if process crashes)
   private readonly lockValue: string; // Unique value for this instance to ensure we only release our own lock
 
+  // Singleton instance
+  private static instance: TaskOperatorService | null = null;
+
   constructor(redis?: Redis) {
     this.databaseService = new DatabaseService();
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379/0';
@@ -38,6 +41,25 @@ export class TaskOperatorService {
       });
     // Generate unique lock value for this instance (process ID + timestamp)
     this.lockValue = `${process.pid}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
+   * Get the singleton instance of TaskOperatorService
+   * This ensures all parts of the application share the same instance
+   * and the same pendingTasks Map
+   */
+  static getInstance(redis?: Redis): TaskOperatorService {
+    if (!TaskOperatorService.instance) {
+      TaskOperatorService.instance = new TaskOperatorService(redis);
+    }
+    return TaskOperatorService.instance;
+  }
+
+  /**
+   * Reset the singleton instance (mainly for testing)
+   */
+  static resetInstance(): void {
+    TaskOperatorService.instance = null;
   }
 
   /**

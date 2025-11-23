@@ -372,7 +372,7 @@ export class CursorAgentsApp {
     this.app.get('/task-operator/lock', async (_req: Request, res: Response): Promise<void> => {
       try {
         const { TaskOperatorService } = await import('./services/task-operator-service.js');
-        const taskOperatorService = new TaskOperatorService();
+        const taskOperatorService = TaskOperatorService.getInstance();
 
         const isLocked = await taskOperatorService.isProcessing();
 
@@ -397,7 +397,7 @@ export class CursorAgentsApp {
     this.app.delete('/task-operator/lock', async (_req: Request, res: Response): Promise<void> => {
       try {
         const { TaskOperatorService } = await import('./services/task-operator-service.js');
-        const taskOperatorService = new TaskOperatorService();
+        const taskOperatorService = TaskOperatorService.getInstance();
 
         const cleared = await taskOperatorService.clearLock();
 
@@ -469,10 +469,11 @@ export class CursorAgentsApp {
           fullBody: JSON.stringify(body),
         });
 
-        // Get TaskOperatorService instance to handle the callback
+        // Get TaskOperatorService singleton instance to handle the callback
         // We need to import it here to avoid circular dependency
+        // Using getInstance() ensures we use the same instance that processes tasks
         const { TaskOperatorService } = await import('./services/task-operator-service.js');
-        const taskOperatorService = new TaskOperatorService();
+        const taskOperatorService = TaskOperatorService.getInstance();
 
         // Handle the callback (marks task complete or failed)
         await taskOperatorService.handleCallback(requestId, body);
