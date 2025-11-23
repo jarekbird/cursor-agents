@@ -105,8 +105,8 @@ export class DatabaseService {
   static readonly STATUS_IN_PROGRESS = 4;
 
   /**
-   * Get the next ready task (lowest order)
-   * Only returns tasks with status = 0 (ready)
+   * Get the next ready or in-progress task (lowest order)
+   * Returns tasks with status = 0 (ready) or status = 4 (in_progress)
    */
   getNextReadyTask(): {
     id: number;
@@ -119,7 +119,7 @@ export class DatabaseService {
       const db = this.getDatabase();
       const row = db
         .prepare(
-          'SELECT id, prompt, "order", uuid, status FROM tasks WHERE status = 0 ORDER BY "order" ASC, id ASC LIMIT 1'
+          'SELECT id, prompt, "order", uuid, status FROM tasks WHERE status IN (0, 4) ORDER BY "order" ASC, id ASC LIMIT 1'
         )
         .get() as
         | { id: number; prompt: string; order: number; uuid: string; status: number }
