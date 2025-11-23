@@ -1,5 +1,20 @@
 # cursor-agents Cursor Rules
 
+## Public API Documentation
+
+**IMPORTANT: For API integration details, refer to jarek-va's public API documentation:**
+- **File Location**: `jarek-va/docs/API.md`
+- **Public Access**: `GET /api/docs` or `GET /api/docs.json` on the jarek-va service
+- **Endpoints**: `/api/prompt` (POST) and `/api/conversation/new` (POST)
+
+The API documentation describes:
+- How external agents can interact with the Virtual Assistant system
+- Available tools and capabilities accessible through prompts
+- Conversation context management
+- Best practices for prompt engineering
+
+**When working on features that interact with external agents or need to understand the public API, refer to `jarek-va/docs/API.md`.**
+
 ## Documentation Files
 
 **IMPORTANT: Do NOT create .md (Markdown) documentation files in this project.**
@@ -8,4 +23,6 @@
 - Do not create troubleshooting guides, diagnostic files, or other .md files
 - If documentation is needed, add it as code comments or in the main README.md
 - This rule applies to: cursor-runner, cursor-agents, jarek-va, and jarek-va-ui applications
+- **Exception**: The public API documentation at `jarek-va/docs/API.md` is the official API reference and should be referenced when needed
+
 
