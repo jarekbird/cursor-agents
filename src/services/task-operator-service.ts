@@ -80,9 +80,12 @@ export class TaskOperatorService {
 
       logger.info('Creating new conversation for task', { url: conversationUrl });
 
+      // Don't specify queueType - let it default to 'default'
+      // Each task should get its own conversation, and we'll pass the conversationId explicitly
       const response = await fetch(conversationUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queueType: 'default' }),
       });
 
       const responseText = await response.text();
@@ -179,16 +182,38 @@ export class TaskOperatorService {
       }
 
       // Create a new conversation for this task
-      const conversationId = await this.createNewConversation();
+      // Each task MUST have its own conversation to avoid context mixing
+      let conversationId = await this.createNewConversation();
+      if (!conversationId) {
+        // Retry once if conversation creation failed
+        logger.warn('Failed to create new conversation, retrying once', {
+          taskId: task.id,
+        });
+        conversationId = await this.createNewConversation();
+      }
+
       if (conversationId) {
         logger.info('Using new conversation for task', {
           taskId: task.id,
           conversationId,
         });
       } else {
-        logger.warn('Failed to create new conversation, continuing with task anyway', {
+        // If we still can't create a conversation, fail the task
+        logger.error(
+          'Failed to create new conversation after retry, marking task as ready for retry',
+          {
+            taskId: task.id,
+          }
+        );
+        // Mark task as ready again so it can be retried
+        this.databaseService.updateTaskStatus(task.id, 0);
+        await this.releaseLock();
+        return {
+          processed: false,
           taskId: task.id,
-        });
+          error: 'Failed to create new conversation for task',
+          reason: 'error',
+        };
       }
 
       // Generate request ID for tracking
