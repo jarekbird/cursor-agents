@@ -6,9 +6,10 @@ services:
       dockerfile: Dockerfile
     container_name: cursor-agents
     restart: unless-stopped
-    # Remove port mapping - Traefik will route traffic
-    # ports:
-    #   - "3002:3002"
+    # Port mapping for local development access
+    # Traefik will also route traffic in production
+    ports:
+      - "3003:3002"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - PORT=3002

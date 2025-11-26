@@ -26,10 +26,12 @@ export class CursorAgentsApp {
 
   private setupRoutes(): void {
     // Bull Board dashboard (similar to Sidekiq UI)
-    // Base path includes /agents prefix because Traefik strips it before forwarding,
-    // but the browser still needs the full path for asset loading
+    // Base path includes /agents prefix when behind Traefik (Traefik strips it before forwarding,
+    // but the browser still needs the full path for asset loading)
+    // For direct access, use /admin/queues
     this.serverAdapter = new ExpressAdapter();
-    this.serverAdapter.setBasePath('/agents/admin/queues');
+    const basePath = process.env.BULL_BOARD_BASE_PATH || '/admin/queues';
+    this.serverAdapter.setBasePath(basePath);
 
     // Initialize Bull Board with empty queues (will be updated after initialization)
     createBullBoard({
