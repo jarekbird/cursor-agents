@@ -137,14 +137,16 @@ export class QueueManager {
   private async loadExistingQueues(): Promise<void> {
     // Load existing queues from Redis
     // BullMQ stores queue metadata with keys like "bull:{queueName}:meta"
+    // Also stores jobs with keys like "bull:{queueName}:{jobId}", "bull:{queueName}:delayed", etc.
     logger.info('Loading existing queues...');
 
     try {
       // Scan Redis for all BullMQ queue keys
-      // BullMQ uses keys like "bull:{queueName}:meta", "bull:{queueName}:id", etc.
+      // BullMQ uses keys like "bull:{queueName}:meta", "bull:{queueName}:id", "bull:{queueName}:delayed", etc.
       const keys: string[] = [];
       let cursor = '0';
 
+      // First, scan for meta keys (queues with metadata)
       do {
         const [nextCursor, foundKeys] = await this.redis.scan(
           cursor,
@@ -157,10 +159,53 @@ export class QueueManager {
         keys.push(...foundKeys);
       } while (cursor !== '0');
 
-      // Extract queue names from keys (format: "bull:{queueName}:meta")
+      // Also scan for queues with jobs (delayed, waiting, active) that might not have meta keys
+      // This catches queues that were created but only have delayed jobs
+      cursor = '0';
+      do {
+        const [nextCursor, foundKeys] = await this.redis.scan(
+          cursor,
+          'MATCH',
+          'bull:*:delayed',
+          'COUNT',
+          100
+        );
+        cursor = nextCursor;
+        keys.push(...foundKeys);
+      } while (cursor !== '0');
+
+      cursor = '0';
+      do {
+        const [nextCursor, foundKeys] = await this.redis.scan(
+          cursor,
+          'MATCH',
+          'bull:*:wait',
+          'COUNT',
+          100
+        );
+        cursor = nextCursor;
+        keys.push(...foundKeys);
+      } while (cursor !== '0');
+
+      cursor = '0';
+      do {
+        const [nextCursor, foundKeys] = await this.redis.scan(
+          cursor,
+          'MATCH',
+          'bull:*:active',
+          'COUNT',
+          100
+        );
+        cursor = nextCursor;
+        keys.push(...foundKeys);
+      } while (cursor !== '0');
+
+      // Extract queue names from keys
+      // Format: "bull:{queueName}:meta", "bull:{queueName}:delayed", "bull:{queueName}:wait", etc.
       const queueNames = new Set<string>();
       for (const key of keys) {
-        const match = key.match(/^bull:([^:]+):meta$/);
+        // Match any bull:{queueName}:* pattern
+        const match = key.match(/^bull:([^:]+):/);
         if (match) {
           queueNames.add(match[1]);
         }

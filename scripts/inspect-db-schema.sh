@@ -31,7 +31,7 @@ else
       echo "   $0"
       echo ""
       echo "2. Run the access script to mount the database:"
-      echo "   cd ../.. && ./access-shared-db.sh"
+      echo "   cd ../cursor-runner && ./scripts/access-shared-db.sh"
       echo ""
       echo "3. Run inside Docker container:"
       echo "   docker-compose exec cursor-agents npm run inspect:db"

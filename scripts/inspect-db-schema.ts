@@ -30,7 +30,7 @@ try {
     console.error('\nPossible solutions:');
     console.error('1. If running locally, set SHARED_DB_PATH environment variable');
     console.error('2. If running in Docker, ensure the volume is mounted correctly');
-    console.error('3. Run the access-shared-db.sh script to mount the database locally');
+    console.error('3. Run the cursor-runner/scripts/access-shared-db.sh script to mount the database locally');
     process.exit(1);
   }
 } catch (error) {

@@ -41,6 +41,21 @@ export class CursorAgentsApp {
 
     this.app.use('/admin/queues', this.serverAdapter.getRouter());
 
+    // Refresh Bull Board (re-register all queues)
+    this.app.post('/admin/queues/refresh', (_req: Request, res: Response) => {
+      try {
+        this.updateBullBoard();
+        res.json({
+          success: true,
+          message: 'Bull Board refreshed successfully',
+          queueCount: this.queueManager.getQueues().length,
+        });
+      } catch (error) {
+        logger.error('Failed to refresh Bull Board', { error });
+        res.status(500).json({ error: 'Failed to refresh Bull Board' });
+      }
+    });
+
     // Health check endpoint
     this.app.get('/health', (req: Request, res: Response) => {
       logger.info('Health check requested', {
