@@ -21,7 +21,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          timeout: 60s
+          timeout: 120s
           command_timeout: 15m
           script: |
             set -e
@@ -53,24 +53,75 @@ jobs:
               docker volume create cursor_runner_repositories || true
             fi
             
-            # Navigate to cursor-agents directory
-            # Try multiple possible locations
-            if [ -d "cursor-agents" ]; then
+            # Navigate to the service directory in the monorepo
+            # Best Practice: Each service deploys independently using its own docker-compose.yml
+            # The shared docker-compose.yml is for local development only
+            SERVICE_DIR=""
+            
+            if [ -d "VirtualAssistant/cursor-agents" ] && [ -f "VirtualAssistant/cursor-agents/docker-compose.yml" ]; then
+              # Monorepo structure - navigate to service directory
+              echo "✓ Detected monorepo structure - navigating to VirtualAssistant/cursor-agents/"
+              SERVICE_DIR="VirtualAssistant/cursor-agents"
+              cd VirtualAssistant/cursor-agents
+            elif [ -d "$HOME/VirtualAssistant/cursor-agents" ] && [ -f "$HOME/VirtualAssistant/cursor-agents/docker-compose.yml" ]; then
+              echo "✓ Detected monorepo structure at $HOME/VirtualAssistant/cursor-agents/"
+              SERVICE_DIR="$HOME/VirtualAssistant/cursor-agents"
+              cd $HOME/VirtualAssistant/cursor-agents
+            elif [ -d "/opt/VirtualAssistant/cursor-agents" ] && [ -f "/opt/VirtualAssistant/cursor-agents/docker-compose.yml" ]; then
+              echo "✓ Detected monorepo structure at /opt/VirtualAssistant/cursor-agents/"
+              SERVICE_DIR="/opt/VirtualAssistant/cursor-agents"
+              cd /opt/VirtualAssistant/cursor-agents
+            elif [ -d "cursor-agents" ] && [ -f "cursor-agents/docker-compose.yml" ]; then
+              # Standalone structure (fallback)
+              echo "✓ Detected standalone structure - navigating to cursor-agents/"
+              SERVICE_DIR="cursor-agents"
               cd cursor-agents
-            elif [ -d "$HOME/cursor-agents" ]; then
+            elif [ -d "$HOME/cursor-agents" ] && [ -f "$HOME/cursor-agents/docker-compose.yml" ]; then
+              echo "✓ Detected standalone structure at $HOME/cursor-agents/"
+              SERVICE_DIR="$HOME/cursor-agents"
               cd $HOME/cursor-agents
-            elif [ -d "/opt/cursor-agents" ]; then
+            elif [ -d "/opt/cursor-agents" ] && [ -f "/opt/cursor-agents/docker-compose.yml" ]; then
+              echo "✓ Detected standalone structure at /opt/cursor-agents/"
+              SERVICE_DIR="/opt/cursor-agents"
               cd /opt/cursor-agents
             else
-              echo "Error: cursor-agents directory not found in expected locations"
-              echo "Tried: cursor-agents, $HOME/cursor-agents, /opt/cursor-agents"
+              echo "Error: Could not find cursor-agents service directory with docker-compose.yml"
+              echo "Tried locations:"
+              echo "  - VirtualAssistant/cursor-agents/docker-compose.yml (monorepo)"
+              echo "  - $HOME/VirtualAssistant/cursor-agents/docker-compose.yml"
+              echo "  - /opt/VirtualAssistant/cursor-agents/docker-compose.yml"
+              echo "  - cursor-agents/docker-compose.yml (standalone)"
+              echo "  - $HOME/cursor-agents/docker-compose.yml"
+              echo "  - /opt/cursor-agents/docker-compose.yml"
+              echo ""
+              echo "Current directory: $(pwd)"
+              echo "Directory contents:"
+              ls -la
               exit 1
             fi
             
-            # Update code
+            # Store absolute path of service directory for later
+            SERVICE_DIR_ABS=$(pwd)
+            echo "Service directory: $SERVICE_DIR_ABS"
+            echo "Using service's individual docker-compose.yml (best practice for independent deployment)"
+            
+            # Update code from git
+            # In a monorepo, git operations work from any subdirectory
+            # Git will automatically find the repository root
+            echo "Updating code from git..."
+            GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+            if [ -z "$GIT_ROOT" ]; then
+              echo "Error: Not in a git repository"
+              exit 1
+            fi
+            echo "Git repository root: $GIT_ROOT"
+            cd "$GIT_ROOT"
             git fetch origin || { echo "Git fetch failed"; exit 1; }
             BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
             git reset --hard origin/$BRANCH || { echo "Git reset failed"; exit 1; }
+            # Navigate back to service directory
+            cd "$SERVICE_DIR_ABS"
+            echo "Back in service directory: $(pwd)"
             
             # DOMAIN_NAME is optional - used for Traefik routing labels
             # Should be just the domain name (e.g., "jarekva.com") without protocol
@@ -78,15 +129,13 @@ jobs:
             export DOMAIN_NAME=${DOMAIN_NAME:-jarekva.com}
             echo "Using DOMAIN_NAME: $DOMAIN_NAME"
             
-            # Verify we're in the right directory
-            echo "Current directory: $(pwd)"
-            echo "Checking for docker-compose.yml..."
+            # Verify docker-compose.yml exists
             if [ ! -f "docker-compose.yml" ]; then
-              echo "Error: docker-compose.yml not found in current directory"
+              echo "Error: docker-compose.yml not found in current directory: $(pwd)"
               ls -la
               exit 1
             fi
-            echo "docker-compose.yml found"
+            echo "✓ docker-compose.yml found"
             
             # Build and deploy
             # Use docker-compose (with hyphen) for compatibility, or docker compose (with space) if available

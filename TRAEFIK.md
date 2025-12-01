@@ -4,7 +4,7 @@ This document describes how the `cursor-agents` application is exposed via Traef
 
 ## Overview
 
-The `cursor-agents` service is configured to be accessible via HTTPS through Traefik, which is defined in the `jarek-va/docker-compose.yml` file. Both services share the same `virtual-assistant-network` Docker network.
+The `cursor-agents` service is configured to be accessible via HTTPS through Traefik, which is defined in the `cursor-runner/docker-compose.yml` file. Both services share the same `virtual-assistant-network` Docker network.
 
 ## Configuration
 
@@ -44,12 +44,12 @@ The Traefik configuration includes:
 
 ## Network Configuration
 
-Both `cursor-agents` and `jarek-va` services use the same external network:
+Both `cursor-agents` and other services use the same external network:
 - **Network Name**: `virtual-assistant-network`
 - **Type**: External (created separately, shared across services)
 
 This allows:
-- `cursor-agents` to connect to Redis (defined in `jarek-va/docker-compose.yml`)
+- `cursor-agents` to connect to Redis (defined in `cursor-runner/docker-compose.yml`)
 - `cursor-agents` to connect to `cursor-runner` service
 - Traefik to route traffic to `cursor-agents`
 
@@ -57,7 +57,7 @@ This allows:
 
 ### Prerequisites
 
-1. Ensure Traefik is running (defined in `jarek-va/docker-compose.yml`)
+1. Ensure Traefik is running (defined in `cursor-runner/docker-compose.yml`)
 2. Ensure the `virtual-assistant-network` network exists:
    ```bash
    docker network create virtual-assistant-network
@@ -136,7 +136,7 @@ docker compose up -d
 
 ## Related Services
 
-- **Traefik**: Defined in `jarek-va/docker-compose.yml`
-- **Redis**: Defined in `jarek-va/docker-compose.yml`, shared with `cursor-agents`
+- **Traefik**: Defined in `cursor-runner/docker-compose.yml`
+- **Redis**: Defined in `cursor-runner/docker-compose.yml`, shared with `cursor-agents`
 - **cursor-runner**: Should also be on `virtual-assistant-network` for internal communication
 
