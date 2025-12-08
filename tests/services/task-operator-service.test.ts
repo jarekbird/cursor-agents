@@ -327,5 +327,124 @@ describe('TaskOperatorService', () => {
       releaseLockSpy.mockRestore();
     });
   });
+
+  describe('handleCallback', () => {
+    it('should clear foreign lock for unknown requestId', async () => {
+      // Arrange: Unknown requestId, foreign lock
+      const unknownRequestId = 'unknown-request-id';
+      const foreignPid = 99999; // Different PID
+      const foreignLockValue = `${foreignPid}-${Date.now()}-random`;
+      
+      mockRedis.get = jest.fn<() => Promise<string | null>>().mockResolvedValue(foreignLockValue);
+      mockRedis.del = jest.fn<() => Promise<number>>().mockResolvedValue(1);
+      
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Ensure pendingTasks is empty
+      const pendingTasks = (service as any).pendingTasks;
+      pendingTasks.clear();
+      
+      // Mock database service methods (should not be called)
+      const markTaskCompleteSpy = jest.spyOn(dbService, 'markTaskComplete');
+      const updateTaskStatusSpy = jest.spyOn(dbService, 'updateTaskStatus');
+      
+      // Mock clearLock
+      const clearLockSpy = jest.spyOn(service, 'clearLock').mockResolvedValue(true);
+      
+      // Act
+      await service.handleCallback(unknownRequestId, { success: true });
+      
+      // Assert: clearLock was called
+      expect(clearLockSpy).toHaveBeenCalled();
+      
+      // Assert: No database changes occurred
+      expect(markTaskCompleteSpy).not.toHaveBeenCalled();
+      expect(updateTaskStatusSpy).not.toHaveBeenCalled();
+      
+      // Cleanup
+      markTaskCompleteSpy.mockRestore();
+      updateTaskStatusSpy.mockRestore();
+      clearLockSpy.mockRestore();
+    });
+
+    it('should mark task complete and release lock on successful callback', async () => {
+      // Arrange: Seed pendingTasks, mock success
+      const requestId = 'req-123';
+      const taskId = 1;
+      const currentPid = process.pid;
+      const lockValue = `${currentPid}-${Date.now()}-random`;
+      
+      mockRedis.get = jest.fn<() => Promise<string | null>>().mockResolvedValue(lockValue);
+      
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Seed pendingTasks
+      const pendingTasks = (service as any).pendingTasks;
+      pendingTasks.set(requestId, { taskId, requestId, timestamp: Date.now() });
+      
+      // Mock database service
+      const markTaskCompleteSpy = jest.spyOn(dbService, 'markTaskComplete').mockReturnValue(true);
+      
+      // Mock releaseLock
+      const releaseLockSpy = jest.spyOn(service as any, 'releaseLock').mockResolvedValue(undefined);
+      
+      // Act
+      await service.handleCallback(requestId, { success: true, iterations: 3 });
+      
+      // Assert: Task was marked complete
+      expect(markTaskCompleteSpy).toHaveBeenCalledWith(taskId);
+      
+      // Assert: Pending task entry was removed
+      expect(pendingTasks.has(requestId)).toBe(false);
+      
+      // Assert: Lock was released
+      expect(releaseLockSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      markTaskCompleteSpy.mockRestore();
+      releaseLockSpy.mockRestore();
+    });
+
+    it('should reset task to ready and release lock on failed callback', async () => {
+      // Arrange: Seed pendingTasks, mock failure
+      const requestId = 'req-123';
+      const taskId = 1;
+      const currentPid = process.pid;
+      const lockValue = `${currentPid}-${Date.now()}-random`;
+      
+      mockRedis.get = jest.fn<() => Promise<string | null>>().mockResolvedValue(lockValue);
+      
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Seed pendingTasks
+      const pendingTasks = (service as any).pendingTasks;
+      pendingTasks.set(requestId, { taskId, requestId, timestamp: Date.now() });
+      
+      // Mock database service
+      const updateTaskStatusSpy = jest.spyOn(dbService, 'updateTaskStatus').mockReturnValue(true);
+      
+      // Mock releaseLock
+      const releaseLockSpy = jest.spyOn(service as any, 'releaseLock').mockResolvedValue(undefined);
+      
+      // Act
+      await service.handleCallback(requestId, { success: false, error: 'boom' });
+      
+      // Assert: Task was reset to ready (STATUS_READY = 0)
+      expect(updateTaskStatusSpy).toHaveBeenCalledWith(taskId, 0);
+      
+      // Assert: Pending task entry was removed
+      expect(pendingTasks.has(requestId)).toBe(false);
+      
+      // Assert: Lock was released
+      expect(releaseLockSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      updateTaskStatusSpy.mockRestore();
+      releaseLockSpy.mockRestore();
+    });
+  });
 });
 
