@@ -166,6 +166,44 @@ describe('CursorAgentsApp', () => {
     });
   });
 
+  describe('DELETE /queues/:queueName', () => {
+    it('should delete queue successfully', async () => {
+      // Arrange: Mock deleteQueue to resolve
+      mockQueueManager.deleteQueue = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+      await app.initialize();
+
+      // Act
+      const response = await request(app.app)
+        .delete('/queues/q1')
+        .expect(200);
+
+      // Assert
+      expect(response.body).toEqual({
+        success: true,
+        message: expect.stringContaining('q1'),
+      });
+      expect(mockQueueManager.deleteQueue).toHaveBeenCalledWith('q1');
+    });
+
+    it('should return 500 when queue has jobs', async () => {
+      // Arrange: deleteQueue throws error
+      const error = new Error('Queue has remaining jobs');
+      mockQueueManager.deleteQueue = jest.fn<() => Promise<void>>().mockRejectedValue(error);
+
+      await app.initialize();
+
+      // Act
+      const response = await request(app.app)
+        .delete('/queues/q1')
+        .expect(500);
+
+      // Assert
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('jobs');
+    });
+  });
+
   describe('POST /prompts/recurring', () => {
     it('should create a recurring prompt', async () => {
       await app.initialize();
