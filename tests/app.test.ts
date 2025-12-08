@@ -113,6 +113,59 @@ describe('CursorAgentsApp', () => {
     });
   });
 
+  describe('GET /queues/:queueName', () => {
+    it('should return queue info for existing queue', async () => {
+      // Arrange: Mock queueManager.getQueueInfo to return sample queue object for "q1"
+      const mockQueueInfo = {
+        name: 'q1',
+        waiting: 5,
+        active: 2,
+        completed: 10,
+        failed: 1,
+        delayed: 3,
+        agents: [],
+      };
+      mockQueueManager.getQueueInfo.mockResolvedValueOnce(mockQueueInfo);
+
+      await app.initialize();
+
+      // Act: GET /queues/q1 using supertest
+      const response = await request(app.app).get('/queues/q1');
+
+      // Assert: Response status is 200, Response body equals mock queue info
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(mockQueueInfo);
+    });
+
+    it('should return 404 when queue is not found', async () => {
+      // Arrange: Mock getQueueInfo to return null
+      mockQueueManager.getQueueInfo.mockResolvedValueOnce(null);
+
+      await app.initialize();
+
+      // Act: GET /queues/q1
+      const response = await request(app.app).get('/queues/q1');
+
+      // Assert: Response status is 404, Response body contains message `Queue "q1" not found`
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: 'Queue "q1" not found' });
+    });
+
+    it('should return 500 when getQueueInfo throws', async () => {
+      // Arrange: Mock getQueueInfo to throw error
+      mockQueueManager.getQueueInfo.mockRejectedValueOnce(new Error('Database error'));
+
+      await app.initialize();
+
+      // Act: GET /queues/q1
+      const response = await request(app.app).get('/queues/q1');
+
+      // Assert: Response status is 500, Response body contains error JSON
+      expect(response.status).toBe(500);
+      expect(response.body).toHaveProperty('error', 'Failed to get queue info');
+    });
+  });
+
   describe('POST /prompts/recurring', () => {
     it('should create a recurring prompt', async () => {
       await app.initialize();
