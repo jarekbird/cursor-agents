@@ -79,6 +79,41 @@ describe('MCPServer', () => {
         })
       );
       expect(result).toHaveProperty('content');
+      
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }> };
+      expect(resultAny.content).toBeDefined();
+      expect(resultAny.content.length).toBeGreaterThan(0);
+      expect(resultAny.content[0]).toHaveProperty('type', 'text');
+      expect(resultAny.content[0]).toHaveProperty('text');
+      
+      // Parse and assert JSON structure
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow(); // Verify it's valid JSON
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('success', true);
+      expect(content).toHaveProperty('message');
+      expect(typeof content.message).toBe('string');
+      expect(content.message).toContain('test-agent');
+      expect(content.message).toContain('created successfully');
+      
+      expect(content).toHaveProperty('agent');
+      expect(content.agent).toHaveProperty('name', 'test-agent');
+      expect(content.agent).toHaveProperty('targetUrl', 'http://example.com/api');
+      expect(content.agent).toHaveProperty('method', 'GET');
+      expect(content.agent).toHaveProperty('oneTime', true);
+      expect(content.agent).toHaveProperty('queue', 'default');
+      expect(content.agent.schedule).toBeUndefined(); // oneTime agents don't have schedule
+      
+      // Assert types
+      expect(typeof content.success).toBe('boolean');
+      expect(typeof content.message).toBe('string');
+      expect(typeof content.agent.name).toBe('string');
+      expect(typeof content.agent.targetUrl).toBe('string');
+      expect(typeof content.agent.method).toBe('string');
+      expect(typeof content.agent.oneTime).toBe('boolean');
+      expect(typeof content.agent.queue).toBe('string');
     });
 
     it('should create a recurring agent', async () => {
@@ -96,7 +131,7 @@ describe('MCPServer', () => {
         }
       ).handleCreateAgent.bind(mcpServer);
 
-      await handleCreateAgent(config);
+      const result = await handleCreateAgent(config);
 
       expect(mockQueueManager.addRecurringAgent).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -106,6 +141,42 @@ describe('MCPServer', () => {
           schedule: '0 */5 * * * *',
         })
       );
+      
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }> };
+      expect(resultAny.content).toBeDefined();
+      expect(resultAny.content.length).toBeGreaterThan(0);
+      expect(resultAny.content[0]).toHaveProperty('type', 'text');
+      expect(resultAny.content[0]).toHaveProperty('text');
+      
+      // Parse and assert JSON structure
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow(); // Verify it's valid JSON
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('success', true);
+      expect(content).toHaveProperty('message');
+      expect(typeof content.message).toBe('string');
+      expect(content.message).toContain('recurring-agent');
+      expect(content.message).toContain('created successfully');
+      
+      expect(content).toHaveProperty('agent');
+      expect(content.agent).toHaveProperty('name', 'recurring-agent');
+      expect(content.agent).toHaveProperty('targetUrl', 'http://example.com/api');
+      expect(content.agent).toHaveProperty('method', 'POST');
+      expect(content.agent).toHaveProperty('oneTime', false);
+      expect(content.agent).toHaveProperty('schedule', '0 */5 * * * *');
+      expect(content.agent).toHaveProperty('queue', 'default');
+      
+      // Assert types
+      expect(typeof content.success).toBe('boolean');
+      expect(typeof content.message).toBe('string');
+      expect(typeof content.agent.name).toBe('string');
+      expect(typeof content.agent.targetUrl).toBe('string');
+      expect(typeof content.agent.method).toBe('string');
+      expect(typeof content.agent.oneTime).toBe('boolean');
+      expect(typeof content.agent.schedule).toBe('string');
+      expect(typeof content.agent.queue).toBe('string');
     });
 
     it('should throw error if schedule missing for recurring agent', async () => {
@@ -123,7 +194,7 @@ describe('MCPServer', () => {
         }
       ).handleCreateAgent.bind(mcpServer);
 
-      await expect(handleCreateAgent(config)).rejects.toThrow();
+      await expect(handleCreateAgent(config)).rejects.toThrow('Either oneTime must be true or schedule must be provided');
     });
   });
 
