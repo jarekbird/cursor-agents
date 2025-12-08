@@ -580,5 +580,44 @@ describe('DatabaseService', () => {
       expect(result).toBe(false);
     });
   });
+
+  describe('close', () => {
+    it('should close database connection', () => {
+      // Arrange: Create service and trigger connection
+      const service = new DatabaseService(testDbPath);
+      service.isSystemSettingEnabled('test'); // Triggers connection
+      
+      // Act: Close connection
+      expect(() => service.close()).not.toThrow();
+      
+      // Assert: No error thrown, connection is closed
+      // The connection should be closed without throwing
+    });
+
+    it('should handle multiple close calls without error', () => {
+      // Arrange: Create service and trigger connection
+      const service = new DatabaseService(testDbPath);
+      service.isSystemSettingEnabled('test'); // Triggers connection
+      
+      // Act: Close multiple times
+      expect(() => {
+        service.close();
+        service.close(); // Second call should not throw
+        service.close(); // Third call should also not throw
+      }).not.toThrow();
+      
+      // Assert: All calls complete successfully (idempotent behavior)
+    });
+
+    it('should handle close when connection was never opened', () => {
+      // Arrange: Create service but don't trigger connection
+      const service = new DatabaseService(testDbPath);
+      
+      // Act: Close without opening connection
+      expect(() => service.close()).not.toThrow();
+      
+      // Assert: No error thrown (close is safe even if connection doesn't exist)
+    });
+  });
 });
 
