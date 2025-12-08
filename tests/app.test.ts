@@ -691,6 +691,154 @@ describe('CursorAgentsApp', () => {
     });
   });
 
+  describe('POST /task-operator/callback', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      jest.resetModules();
+      process.env = { ...originalEnv };
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+    });
+
+    describe('secret authentication', () => {
+      beforeEach(() => {
+        process.env.WEBHOOK_SECRET = 'test-secret';
+      });
+
+      afterEach(() => {
+        delete process.env.WEBHOOK_SECRET;
+      });
+
+      it('should return 401 when secret is missing', async () => {
+        await app.initialize();
+
+        // Act: POST /task-operator/callback without secret
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .send({ requestId: 'test-request-id' })
+          .expect(401);
+
+        // Assert: 401, "Unauthorized"
+        expect(response.body).toEqual({ error: 'Unauthorized' });
+      });
+
+      it('should return 401 when secret is incorrect', async () => {
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with wrong secret in header
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'wrong-secret')
+          .send({ requestId: 'test-request-id' })
+          .expect(401);
+
+        // Assert: 401, "Unauthorized"
+        expect(response.body).toEqual({ error: 'Unauthorized' });
+      });
+
+      it('should accept secret from x-webhook-secret header', async () => {
+        // Arrange: Mock handleCallback to succeed
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with valid secret in header
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'test-secret')
+          .send({ requestId: 'test-request-id' })
+          .expect(200);
+
+        // Assert: Proceeds to requestId checks (not 401)
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'test-request-id',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id', expect.any(Object));
+      });
+
+      it('should accept secret from x-cursor-runner-secret header', async () => {
+        // Arrange: Mock handleCallback to succeed
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with valid secret in x-cursor-runner-secret header
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-cursor-runner-secret', 'test-secret')
+          .send({ requestId: 'test-request-id' })
+          .expect(200);
+
+        // Assert: Proceeds to requestId checks (not 401)
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'test-request-id',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id', expect.any(Object));
+      });
+
+      it('should accept secret from query string', async () => {
+        // Arrange: Mock handleCallback to succeed
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with valid secret in query string
+        const response = await request(app.app)
+          .post('/task-operator/callback?secret=test-secret')
+          .send({ requestId: 'test-request-id' })
+          .expect(200);
+
+        // Assert: Proceeds to requestId checks (not 401)
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'test-request-id',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id', expect.any(Object));
+      });
+
+      it('should prioritize headers over query string when both are present', async () => {
+        // Arrange: Mock handleCallback to succeed
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with valid secret in header and query
+        const response = await request(app.app)
+          .post('/task-operator/callback?secret=test-secret')
+          .set('x-webhook-secret', 'test-secret')
+          .send({ requestId: 'test-request-id' })
+          .expect(200);
+
+        // Assert: Accepts header secret (proceeds, not 401)
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'test-request-id',
+        });
+      });
+    });
+  });
+
   describe('POST /prompts/recurring', () => {
     it('should create a recurring prompt', async () => {
       await app.initialize();
