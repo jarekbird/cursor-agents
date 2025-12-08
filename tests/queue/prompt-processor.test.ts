@@ -266,5 +266,127 @@ describe('PromptProcessor', () => {
       );
     });
   });
+
+  describe('re-enqueueing', () => {
+    it('should re-enqueue agent when response has requeue: true', async () => {
+      // Arrange: Mock QueueManager, HTTP response with requeue
+      const jobData: AgentJobData = {
+        agentName: 'test-agent',
+        targetUrl: 'http://example.com',
+        method: 'GET',
+        timeout: 5000,
+      };
+      
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify({
+          requeue: true,
+          delay: 5000,
+          condition: 'retry after delay',
+        }),
+      } as Response);
+      
+      // Act
+      await processor.process(jobData);
+      
+      // Assert
+      expect(mockQueueManager.addDelayedAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'test-agent',
+          targetUrl: 'http://example.com',
+          method: 'GET',
+          delay: 5000,
+        })
+      );
+    });
+
+    it('should preserve original agent config when re-enqueueing', async () => {
+      // Arrange: Mock QueueManager, HTTP response with requeue, specific agent config
+      const jobData: AgentJobData = {
+        agentName: 'test-agent',
+        targetUrl: 'http://example.com',
+        method: 'POST',
+        headers: { 'X-Custom': 'value' },
+        body: { key: 'value' },
+        timeout: 10000,
+        queue: 'custom-queue',
+      };
+      
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify({
+          requeue: true,
+          delay: 5000,
+        }),
+      } as Response);
+      
+      // Act
+      await processor.process(jobData);
+      
+      // Assert: addDelayedAgent called with original agent config
+      expect(mockQueueManager.addDelayedAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'test-agent',
+          targetUrl: 'http://example.com',
+          method: 'POST',
+          headers: { 'X-Custom': 'value' },
+          body: { key: 'value' },
+          timeout: 10000,
+          queue: 'custom-queue',
+          delay: 5000,
+        })
+      );
+    });
+
+    it('should not re-enqueue when requeue flag is missing', async () => {
+      // Arrange: Response without requeue field
+      const jobData: AgentJobData = {
+        agentName: 'test-agent',
+        targetUrl: 'http://example.com',
+        method: 'GET',
+        timeout: 5000,
+      };
+      
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify({ success: true }), // No requeue field
+      } as Response);
+      
+      // Act
+      await processor.process(jobData);
+      
+      // Assert
+      expect(mockQueueManager.addDelayedAgent).not.toHaveBeenCalled();
+    });
+
+    it('should not re-enqueue when requeue is false', async () => {
+      // Arrange: Response with requeue: false
+      const jobData: AgentJobData = {
+        agentName: 'test-agent',
+        targetUrl: 'http://example.com',
+        method: 'GET',
+        timeout: 5000,
+      };
+      
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify({ requeue: false }),
+      } as Response);
+      
+      // Act
+      await processor.process(jobData);
+      
+      // Assert
+      expect(mockQueueManager.addDelayedAgent).not.toHaveBeenCalled();
+    });
+  });
 });
 
