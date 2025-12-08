@@ -105,6 +105,165 @@ describe('Integration Tests', () => {
       expect(deleteResponse.status).toBe(200);
       expect(mockQueueManager.removeRecurringPrompt).toHaveBeenCalledWith('test-agent');
     });
+
+    it('should handle complete agent lifecycle with stateful mock', async () => {
+      // Arrange: Create stateful QueueManager mock that retains agent state
+      const agentState = new Map<string, { id: string; name: string; status: unknown }>();
+      const queueState = new Set<string>();
+
+      const statefulMockQueueManager = {
+        initialize: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        listQueues: jest.fn<() => Promise<string[]>>().mockImplementation(async () => {
+          return Array.from(queueState);
+        }),
+        addOneTimeAgent: jest.fn<(config: { name: string }) => Promise<{ id: string; name: string }>>().mockImplementation(async (config: { name: string }) => {
+          const agent = { id: `job-${Date.now()}`, name: config.name, status: { name: config.name, isActive: true } };
+          agentState.set(config.name, agent);
+          queueState.add(config.name);
+          return { id: agent.id, name: agent.name };
+        }),
+        addRecurringAgent: jest.fn<(config: { name: string }) => Promise<{ id: string; name: string }>>().mockImplementation(async (config: { name: string }) => {
+          const agent = { id: `job-${Date.now()}`, name: config.name, status: { name: config.name, isActive: true } };
+          agentState.set(config.name, agent);
+          queueState.add(config.name);
+          return { id: agent.id, name: agent.name };
+        }),
+        getAgentStatus: jest.fn<(name: string) => Promise<unknown>>().mockImplementation(async (name: string) => {
+          const agent = agentState.get(name);
+          return agent ? agent.status : null;
+        }),
+        removeAgent: jest.fn<(name: string) => Promise<void>>().mockImplementation(async (name: string) => {
+          agentState.delete(name);
+          queueState.delete(name);
+        }),
+        getQueues: jest.fn<() => unknown[]>().mockReturnValue([]),
+        getQueueInfo: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+        shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      } as unknown as jest.Mocked<QueueManager>;
+
+      // Create app with stateful mock
+      const testApp = new CursorAgentsApp(statefulMockQueueManager);
+      await testApp.initialize();
+
+      // Step 1: POST /agents to create one-time agent
+      const createResponse = await request(testApp.app)
+        .post('/agents')
+        .send({
+          name: 'lifecycle-agent',
+          targetUrl: 'http://example.com/api',
+          oneTime: true,
+        });
+
+      expect(createResponse.status).toBe(200);
+      expect(createResponse.body).toHaveProperty('success', true);
+      expect(createResponse.body).toHaveProperty('agent');
+      expect(createResponse.body.agent).toHaveProperty('name', 'lifecycle-agent');
+      expect(statefulMockQueueManager.addOneTimeAgent).toHaveBeenCalled();
+
+      // Step 2: GET /agents/:name to check status
+      const statusResponse = await request(testApp.app)
+        .get('/agents/lifecycle-agent');
+
+      expect(statusResponse.status).toBe(200);
+      expect(statusResponse.body).toHaveProperty('name', 'lifecycle-agent');
+      expect(statusResponse.body).toHaveProperty('isActive', true);
+      expect(statefulMockQueueManager.getAgentStatus).toHaveBeenCalledWith('lifecycle-agent');
+
+      // Step 3: DELETE /agents/:name to delete agent
+      const deleteResponse = await request(testApp.app)
+        .delete('/agents/lifecycle-agent');
+
+      expect(deleteResponse.status).toBe(200);
+      expect(deleteResponse.body).toHaveProperty('success', true);
+      expect(statefulMockQueueManager.removeAgent).toHaveBeenCalledWith('lifecycle-agent');
+
+      // Step 4: GET /agents/:name to verify deletion
+      // Update mock to return null after deletion
+      statefulMockQueueManager.getAgentStatus.mockResolvedValueOnce(null);
+      
+      const verifyResponse = await request(testApp.app)
+        .get('/agents/lifecycle-agent');
+
+      expect(verifyResponse.status).toBe(404);
+      expect(verifyResponse.body).toHaveProperty('error');
+      expect(verifyResponse.body.error).toContain('lifecycle-agent');
+      expect(verifyResponse.body.error).toContain('not found');
+
+      await testApp.shutdown().catch(() => {});
+    });
+
+    it('should handle complete recurring agent lifecycle', async () => {
+      // Arrange: Create stateful QueueManager mock
+      const agentState = new Map<string, { id: string; name: string; status: unknown }>();
+      const queueState = new Set<string>();
+
+      const statefulMockQueueManager = {
+        initialize: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        listQueues: jest.fn<() => Promise<string[]>>().mockImplementation(async () => {
+          return Array.from(queueState);
+        }),
+        addRecurringAgent: jest.fn<(config: { name: string }) => Promise<{ id: string; name: string }>>().mockImplementation(async (config: { name: string }) => {
+          const agent = { id: `job-${Date.now()}`, name: config.name, status: { name: config.name, isActive: true, schedule: '0 */5 * * * *' } };
+          agentState.set(config.name, agent);
+          queueState.add(config.name);
+          return { id: agent.id, name: agent.name };
+        }),
+        getAgentStatus: jest.fn<(name: string) => Promise<unknown>>().mockImplementation(async (name: string) => {
+          const agent = agentState.get(name);
+          return agent ? agent.status : null;
+        }),
+        removeAgent: jest.fn<(name: string) => Promise<void>>().mockImplementation(async (name: string) => {
+          agentState.delete(name);
+          queueState.delete(name);
+        }),
+        getQueues: jest.fn<() => unknown[]>().mockReturnValue([]),
+        getQueueInfo: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+        shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      } as unknown as jest.Mocked<QueueManager>;
+
+      // Create app with stateful mock
+      const testApp = new CursorAgentsApp(statefulMockQueueManager);
+      await testApp.initialize();
+
+      // Step 1: POST /agents to create recurring agent
+      const createResponse = await request(testApp.app)
+        .post('/agents')
+        .send({
+          name: 'recurring-lifecycle-agent',
+          targetUrl: 'http://example.com/api',
+          schedule: '0 */5 * * * *',
+          oneTime: false,
+        });
+
+      expect(createResponse.status).toBe(200);
+      expect(createResponse.body).toHaveProperty('success', true);
+      expect(statefulMockQueueManager.addRecurringAgent).toHaveBeenCalled();
+
+      // Step 2: GET /agents/:name to check status
+      const statusResponse = await request(testApp.app)
+        .get('/agents/recurring-lifecycle-agent');
+
+      expect(statusResponse.status).toBe(200);
+      expect(statusResponse.body).toHaveProperty('name', 'recurring-lifecycle-agent');
+      expect(statusResponse.body).toHaveProperty('isActive', true);
+
+      // Step 3: DELETE /agents/:name to delete agent
+      const deleteResponse = await request(testApp.app)
+        .delete('/agents/recurring-lifecycle-agent');
+
+      expect(deleteResponse.status).toBe(200);
+      expect(statefulMockQueueManager.removeAgent).toHaveBeenCalledWith('recurring-lifecycle-agent');
+
+      // Step 4: GET /agents/:name to verify deletion
+      statefulMockQueueManager.getAgentStatus.mockResolvedValueOnce(null);
+      
+      const verifyResponse = await request(testApp.app)
+        .get('/agents/recurring-lifecycle-agent');
+
+      expect(verifyResponse.status).toBe(404);
+
+      await testApp.shutdown().catch(() => {});
+    });
   });
 
   describe('HTTP Agent Execution', () => {
