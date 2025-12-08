@@ -837,6 +837,105 @@ describe('CursorAgentsApp', () => {
         });
       });
     });
+
+    describe('requestId validation', () => {
+      beforeEach(() => {
+        process.env.WEBHOOK_SECRET = 'test-secret';
+      });
+
+      afterEach(() => {
+        delete process.env.WEBHOOK_SECRET;
+      });
+
+      it('should return 400 when requestId is missing', async () => {
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with valid secret but no requestId
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'test-secret')
+          .send({})
+          .expect(400);
+
+        // Assert: 400, "requestId is required"
+        expect(response.body).toEqual({ error: 'requestId is required' });
+      });
+
+      it('should accept requestId from body', async () => {
+        // Arrange: Mock handleCallback to succeed
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with requestId in body
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'test-secret')
+          .send({ requestId: 'test-request-id-123' })
+          .expect(200);
+
+        // Assert: Proceeds to callback processing (not 400)
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'test-request-id-123',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id-123', expect.objectContaining({ requestId: 'test-request-id-123' }));
+      });
+
+      it('should accept request_id from body', async () => {
+        // Arrange: Mock handleCallback to succeed
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with request_id in body
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'test-secret')
+          .send({ request_id: 'test-request-id-456' })
+          .expect(200);
+
+        // Assert: Proceeds to callback processing (not 400)
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'test-request-id-456',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id-456', expect.objectContaining({ request_id: 'test-request-id-456' }));
+      });
+
+      it('should prioritize requestId over request_id when both are present', async () => {
+        // Arrange: Mock handleCallback to succeed
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with both requestId and request_id
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'test-secret')
+          .send({ requestId: 'priority-id', request_id: 'secondary-id' })
+          .expect(200);
+
+        // Assert: Uses requestId (priority)
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'priority-id',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('priority-id', expect.objectContaining({ requestId: 'priority-id', request_id: 'secondary-id' }));
+      });
+    });
   });
 
   describe('POST /prompts/recurring', () => {
