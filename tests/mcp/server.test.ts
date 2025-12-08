@@ -45,6 +45,8 @@ describe('MCPServer', () => {
       }),
       removeAgent: jest.fn<(name: string) => Promise<void>>().mockResolvedValue(undefined),
       getQueues: jest.fn<() => unknown[]>().mockReturnValue([]),
+      getQueueInfo: jest.fn<(name: string) => Promise<unknown>>().mockResolvedValue(null),
+      deleteQueue: jest.fn<(name: string) => Promise<void>>().mockResolvedValue(undefined),
       shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<QueueManager>;
 
@@ -428,6 +430,266 @@ describe('MCPServer', () => {
 
       expect(mockQueueManager.removeAgent).toHaveBeenCalledWith('test-agent');
       expect(result).toHaveProperty('content');
+      
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+      expect(resultAny.content).toBeDefined();
+      expect(resultAny.content.length).toBeGreaterThan(0);
+      expect(resultAny.content[0]).toHaveProperty('type', 'text');
+      expect(resultAny.content[0]).toHaveProperty('text');
+      expect(resultAny.isError).toBeUndefined(); // Should not be an error
+      
+      // Parse and assert JSON structure
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow(); // Verify it's valid JSON
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('success', true);
+      expect(content).toHaveProperty('message');
+      expect(typeof content.message).toBe('string');
+      expect(content.message).toContain('test-agent');
+      expect(content.message).toContain('deleted successfully');
+      
+      // Assert types
+      expect(typeof content.success).toBe('boolean');
+      expect(typeof content.message).toBe('string');
+    });
+  });
+
+  describe('list_queues tool', () => {
+    it('should list all queues with info', async () => {
+      // Arrange: Mock listQueues and getQueueInfo
+      const mockQueueInfo1 = {
+        name: 'queue1',
+        waiting: 5,
+        active: 2,
+        completed: 10,
+        failed: 1,
+        delayed: 3,
+        agents: [],
+      };
+      const mockQueueInfo2 = {
+        name: 'queue2',
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+        delayed: 0,
+        agents: [],
+      };
+      mockQueueManager.listQueues.mockResolvedValue(['queue1', 'queue2']);
+      mockQueueManager.getQueueInfo
+        .mockResolvedValueOnce(mockQueueInfo1)
+        .mockResolvedValueOnce(mockQueueInfo2);
+
+      const handleListQueues = (
+        mcpServer as unknown as {
+          handleListQueues: () => Promise<unknown>;
+        }
+      ).handleListQueues.bind(mcpServer);
+
+      const result = await handleListQueues();
+
+      expect(mockQueueManager.listQueues).toHaveBeenCalled();
+      
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+      expect(resultAny.content).toBeDefined();
+      expect(resultAny.content.length).toBeGreaterThan(0);
+      expect(resultAny.content[0]).toHaveProperty('type', 'text');
+      expect(resultAny.content[0]).toHaveProperty('text');
+      expect(resultAny.isError).toBeUndefined();
+      
+      // Parse and assert JSON structure
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow();
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('queues');
+      expect(Array.isArray(content.queues)).toBe(true);
+      expect(content.queues.length).toBe(2);
+      
+      // Assert queue object structure
+      const queue1 = content.queues[0];
+      expect(queue1).toHaveProperty('name', 'queue1');
+      expect(queue1).toHaveProperty('waiting', 5);
+      expect(queue1).toHaveProperty('active', 2);
+      expect(queue1).toHaveProperty('completed', 10);
+      expect(queue1).toHaveProperty('failed', 1);
+      expect(queue1).toHaveProperty('delayed', 3);
+      expect(queue1).toHaveProperty('agents');
+      expect(Array.isArray(queue1.agents)).toBe(true);
+      
+      // Assert types
+      expect(typeof queue1.name).toBe('string');
+      expect(typeof queue1.waiting).toBe('number');
+      expect(typeof queue1.active).toBe('number');
+      expect(typeof queue1.completed).toBe('number');
+      expect(typeof queue1.failed).toBe('number');
+      expect(typeof queue1.delayed).toBe('number');
+    });
+
+    it('should filter out null queue infos', async () => {
+      // Arrange: Mock listQueues to return queue names, but getQueueInfo returns null for some
+      mockQueueManager.listQueues.mockResolvedValue(['queue1', 'queue2', 'queue3']);
+      mockQueueManager.getQueueInfo
+        .mockResolvedValueOnce({
+          name: 'queue1',
+          waiting: 0,
+          active: 0,
+          completed: 0,
+          failed: 0,
+          delayed: 0,
+          agents: [],
+        })
+        .mockResolvedValueOnce(null) // This should be filtered out
+        .mockResolvedValueOnce({
+          name: 'queue3',
+          waiting: 0,
+          active: 0,
+          completed: 0,
+          failed: 0,
+          delayed: 0,
+          agents: [],
+        });
+
+      const handleListQueues = (
+        mcpServer as unknown as {
+          handleListQueues: () => Promise<unknown>;
+        }
+      ).handleListQueues.bind(mcpServer);
+
+      const result = await handleListQueues();
+
+      // Assert JSON structure - null queue infos should be filtered out
+      const resultAny = result as { content: Array<{ type: string; text: string }> };
+      const jsonText = resultAny.content[0].text;
+      const content = JSON.parse(jsonText);
+      
+      expect(content).toHaveProperty('queues');
+      expect(Array.isArray(content.queues)).toBe(true);
+      expect(content.queues.length).toBe(2); // Only 2 non-null queue infos
+      expect(content.queues.every((q: unknown) => q !== null)).toBe(true);
+    });
+  });
+
+  describe('get_queue_info tool', () => {
+    it('should return queue info for existing queue', async () => {
+      // Arrange: Mock getQueueInfo to return queue info
+      const mockQueueInfo = {
+        name: 'test-queue',
+        waiting: 5,
+        active: 2,
+        completed: 10,
+        failed: 1,
+        delayed: 3,
+        agents: [],
+      };
+      mockQueueManager.getQueueInfo.mockResolvedValueOnce(mockQueueInfo);
+
+      const handleGetQueueInfo = (
+        mcpServer as unknown as {
+          handleGetQueueInfo: (args: { queueName: string }) => Promise<unknown>;
+        }
+      ).handleGetQueueInfo.bind(mcpServer);
+
+      const result = await handleGetQueueInfo({ queueName: 'test-queue' });
+
+      expect(mockQueueManager.getQueueInfo).toHaveBeenCalledWith('test-queue');
+      
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+      expect(resultAny.content).toBeDefined();
+      expect(resultAny.content.length).toBeGreaterThan(0);
+      expect(resultAny.content[0]).toHaveProperty('type', 'text');
+      expect(resultAny.content[0]).toHaveProperty('text');
+      expect(resultAny.isError).toBeUndefined();
+      
+      // Parse and assert JSON structure
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow();
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('name', 'test-queue');
+      expect(content).toHaveProperty('waiting', 5);
+      expect(content).toHaveProperty('active', 2);
+      expect(content).toHaveProperty('completed', 10);
+      expect(content).toHaveProperty('failed', 1);
+      expect(content).toHaveProperty('delayed', 3);
+      expect(content).toHaveProperty('agents');
+      expect(Array.isArray(content.agents)).toBe(true);
+      
+      // Assert types
+      expect(typeof content.name).toBe('string');
+      expect(typeof content.waiting).toBe('number');
+      expect(typeof content.active).toBe('number');
+      expect(typeof content.completed).toBe('number');
+      expect(typeof content.failed).toBe('number');
+      expect(typeof content.delayed).toBe('number');
+    });
+
+    it('should return error if queue not found', async () => {
+      // Arrange: Mock getQueueInfo to return null
+      mockQueueManager.getQueueInfo.mockResolvedValueOnce(null);
+
+      const handleGetQueueInfo = (
+        mcpServer as unknown as {
+          handleGetQueueInfo: (args: { queueName: string }) => Promise<unknown>;
+        }
+      ).handleGetQueueInfo.bind(mcpServer);
+
+      const result = await handleGetQueueInfo({ queueName: 'non-existent' });
+      
+      // Assert JSON structure for error case
+      const resultAny = result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+      expect(resultAny.isError).toBe(true);
+      
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow();
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('error');
+      expect(typeof content.error).toBe('string');
+      expect(content.error).toContain('non-existent');
+      expect(content.error).toContain('not found');
+    });
+  });
+
+  describe('delete_queue tool', () => {
+    it('should delete queue successfully', async () => {
+      const handleDeleteQueue = (
+        mcpServer as unknown as {
+          handleDeleteQueue: (args: { queueName: string }) => Promise<unknown>;
+        }
+      ).handleDeleteQueue.bind(mcpServer);
+
+      const result = await handleDeleteQueue({ queueName: 'test-queue' });
+
+      expect(mockQueueManager.deleteQueue).toHaveBeenCalledWith('test-queue');
+      expect(result).toHaveProperty('content');
+      
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+      expect(resultAny.content).toBeDefined();
+      expect(resultAny.content.length).toBeGreaterThan(0);
+      expect(resultAny.content[0]).toHaveProperty('type', 'text');
+      expect(resultAny.content[0]).toHaveProperty('text');
+      expect(resultAny.isError).toBeUndefined();
+      
+      // Parse and assert JSON structure
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow();
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('success', true);
+      expect(content).toHaveProperty('message');
+      expect(typeof content.message).toBe('string');
+      expect(content.message).toContain('test-queue');
+      expect(content.message).toContain('deleted successfully');
+      
+      // Assert types
+      expect(typeof content.success).toBe('boolean');
+      expect(typeof content.message).toBe('string');
     });
   });
 
