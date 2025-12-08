@@ -153,6 +153,45 @@ describe('DatabaseService', () => {
       // Assert
       expect(result).toBe(false);
     });
+
+    it('should return false when setting does not exist', () => {
+      // Arrange: Empty table (no rows inserted)
+      // The table is already created in beforeEach, just don't insert any rows
+      
+      // Act
+      const result = dbService.isSystemSettingEnabled('non_existent');
+      
+      // Assert: Returns false without throwing exception
+      expect(result).toBe(false);
+    });
+
+    it('should return false and log error when query fails', () => {
+      // Arrange: Drop the table to cause query to fail
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`DROP TABLE IF EXISTS system_settings`);
+      setupDb.close();
+      
+      // Mock logger.error to verify it's called
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => {
+        return logger;
+      });
+      
+      // Act
+      const result = dbService.isSystemSettingEnabled('test');
+      
+      // Assert: Returns false (fail-closed behavior)
+      expect(result).toBe(false);
+      
+      // Assert: Error was logged
+      expect(errorSpy).toHaveBeenCalled();
+      const errorCall = errorSpy.mock.calls[0];
+      expect(errorCall.length).toBeGreaterThan(0);
+      const firstArg = errorCall[0];
+      expect(firstArg).toBeDefined();
+      
+      // Cleanup
+      errorSpy.mockRestore();
+    });
   });
 });
 
