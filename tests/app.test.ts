@@ -936,6 +936,80 @@ describe('CursorAgentsApp', () => {
         expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('priority-id', expect.objectContaining({ requestId: 'priority-id', request_id: 'secondary-id' }));
       });
     });
+
+    describe('callback processing', () => {
+      beforeEach(() => {
+        process.env.WEBHOOK_SECRET = 'test-secret';
+      });
+
+      afterEach(() => {
+        delete process.env.WEBHOOK_SECRET;
+      });
+
+      it('should process callback successfully', async () => {
+        // Arrange: Mock handleCallback to succeed
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with valid secret and callback data
+        const callbackBody = {
+          requestId: 'test-request-id-789',
+          success: true,
+          output: 'Task completed successfully',
+          iterations: 5,
+          maxIterations: 10,
+        };
+
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'test-secret')
+          .send(callbackBody)
+          .expect(200);
+
+        // Assert: 200, { received: true, requestId }
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'test-request-id-789',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id-789', callbackBody);
+      });
+
+      it('should process callback with error data', async () => {
+        // Arrange: Mock handleCallback to succeed (even with error in body)
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with error in body
+        const callbackBody = {
+          requestId: 'test-request-id-error',
+          success: false,
+          error: 'Task failed',
+        };
+
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'test-secret')
+          .send(callbackBody)
+          .expect(200);
+
+        // Assert: Still returns 200 (always returns 200 to prevent retries)
+        expect(response.body).toEqual({
+          received: true,
+          requestId: 'test-request-id-error',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id-error', callbackBody);
+      });
+    });
   });
 
   describe('POST /prompts/recurring', () => {
