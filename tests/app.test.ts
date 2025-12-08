@@ -11,8 +11,10 @@ jest.mock('@bull-board/api', () => ({
   createBullBoard: jest.fn(),
 }));
 
+// Mock BullMQAdapter to avoid queue type validation
+const MockBullMQAdapter = jest.fn().mockImplementation(() => ({}));
 jest.mock('@bull-board/api/bullMQAdapter', () => ({
-  BullMQAdapter: jest.fn(),
+  BullMQAdapter: MockBullMQAdapter,
 }));
 
 const mockSetBasePath = jest.fn();
@@ -265,6 +267,49 @@ describe('CursorAgentsApp', () => {
       // Cleanup
       process.env.BULL_BOARD_BASE_PATH = originalEnv;
       await testApp.shutdown().catch(() => {});
+    });
+
+    it('should refresh Bull Board and return queue count', async () => {
+      // Arrange: Ensure getQueues returns empty array to avoid BullMQAdapter validation issues
+      mockQueueManager.getQueues.mockReturnValue([] as any);
+      
+      await app.initialize();
+      
+      // Act
+      const response = await request(app.app)
+        .post('/admin/queues/refresh')
+        .expect(200);
+      
+      // Assert
+      expect(response.body).toEqual({
+        success: true,
+        message: 'Bull Board refreshed successfully',
+        queueCount: 0, // Empty queues array
+      });
+      // Verify getQueues was called (which updateBullBoard uses)
+      expect(mockQueueManager.getQueues).toHaveBeenCalled();
+    });
+
+    it('should return 500 when refresh fails', async () => {
+      // Arrange: Force updateBullBoard to throw
+      await app.initialize();
+      
+      const updateBullBoardSpy = jest.spyOn(app as any, 'updateBullBoard').mockImplementation(() => {
+        throw new Error('Refresh failed');
+      });
+      
+      // Act
+      const response = await request(app.app)
+        .post('/admin/queues/refresh')
+        .expect(500);
+      
+      // Assert
+      expect(response.body).toEqual({
+        error: 'Failed to refresh Bull Board',
+      });
+      
+      // Cleanup
+      updateBullBoardSpy.mockRestore();
     });
   });
 
