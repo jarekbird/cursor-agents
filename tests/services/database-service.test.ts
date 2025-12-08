@@ -126,5 +126,20 @@ describe('DatabaseService', () => {
     // Cleanup
     errorSpy.mockRestore();
   });
+
+  describe('isSystemSettingEnabled', () => {
+    it('should return true when setting exists with value 1', () => {
+      // Arrange: Insert setting with value 1
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`INSERT INTO system_settings (name, value) VALUES ('test_setting', 1)`);
+      setupDb.close();
+      
+      // Act
+      const result = dbService.isSystemSettingEnabled('test_setting');
+      
+      // Assert
+      expect(result).toBe(true);
+    });
+  });
 });
 
