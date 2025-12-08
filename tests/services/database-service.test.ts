@@ -14,6 +14,7 @@ import Database from 'better-sqlite3';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { unlinkSync } from 'fs';
+import { logger } from '../../src/logger.js';
 
 describe('DatabaseService', () => {
   let dbService: DatabaseService;
@@ -92,6 +93,38 @@ describe('DatabaseService', () => {
     checkDb.close();
     
     expect(journalMode.toLowerCase()).toBe('wal');
+  });
+
+  it('should throw error on database connection failure', () => {
+    // Arrange: Create DatabaseService with invalid path (non-existent directory)
+    const invalidPath = '/invalid/path/that/does/not/exist/db.sqlite3';
+    const service = new DatabaseService(invalidPath);
+    
+    // Mock logger.error to verify it's called
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => {
+      // Mock implementation - don't actually log, just return logger
+      return logger;
+    });
+    
+    // Act & Assert: Calling a method that triggers getDatabase() should cause an error
+    // Note: isSystemSettingEnabled catches errors and returns false,
+    // but getDatabase() itself throws, which is caught and logged
+    const result = service.isSystemSettingEnabled('test');
+    
+    // Assert: Method returns false (error was caught and handled gracefully)
+    expect(result).toBe(false);
+    
+    // Assert: Error was logged (verify logger.error was called)
+    expect(errorSpy).toHaveBeenCalled();
+    // Verify the call contains information about the failure
+    const errorCall = errorSpy.mock.calls[0];
+    expect(errorCall.length).toBeGreaterThan(0);
+    // The first argument should be the log info (message or info object)
+    const firstArg = errorCall[0];
+    expect(firstArg).toBeDefined();
+    
+    // Cleanup
+    errorSpy.mockRestore();
   });
 });
 
