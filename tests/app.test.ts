@@ -15,9 +15,10 @@ jest.mock('@bull-board/api/bullMQAdapter', () => ({
   BullMQAdapter: jest.fn(),
 }));
 
+const mockSetBasePath = jest.fn();
 jest.mock('@bull-board/express', () => ({
   ExpressAdapter: jest.fn().mockImplementation(() => ({
-    setBasePath: jest.fn(),
+    setBasePath: mockSetBasePath,
     getRouter: jest.fn().mockReturnValue({
       get: jest.fn(),
       post: jest.fn(),
@@ -30,6 +31,9 @@ describe('CursorAgentsApp', () => {
   let mockQueueManager: jest.Mocked<QueueManager>;
 
   beforeEach(() => {
+    // Reset mocks
+    mockSetBasePath.mockClear();
+    
     // Create mock QueueManager
     mockQueueManager = {
       initialize: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
@@ -241,6 +245,26 @@ describe('CursorAgentsApp', () => {
       // Bull Board should return HTML
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toContain('text/html');
+    });
+
+    it('should serve Bull Board dashboard at configured base path', async () => {
+      // Arrange: Set base path, create app
+      const originalEnv = process.env.BULL_BOARD_BASE_PATH;
+      process.env.BULL_BOARD_BASE_PATH = '/agents/admin/queues';
+      
+      const testApp = new CursorAgentsApp(mockQueueManager);
+      await testApp.initialize();
+      
+      // Act: GET /admin/queues (the route is still /admin/queues, base path is for assets)
+      const response = await request(testApp.app).get('/admin/queues');
+      
+      // Assert: 200, HTML response
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toContain('text/html');
+      
+      // Cleanup
+      process.env.BULL_BOARD_BASE_PATH = originalEnv;
+      await testApp.shutdown().catch(() => {});
     });
   });
 
