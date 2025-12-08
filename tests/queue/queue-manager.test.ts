@@ -581,6 +581,148 @@ describe('QueueManager', () => {
     });
   });
 
+  describe('getAgentStatus', () => {
+    it('should return null when agent is not found', async () => {
+      // Arrange: Mock queues with no matching jobs
+      await queueManager.initialize();
+      
+      // Act
+      const result = await queueManager.getAgentStatus('non-existent-agent');
+      
+      // Assert
+      expect(result).toBeNull();
+    });
+
+    it('should return complete AgentStatus when agent is found', async () => {
+      // Arrange: Create queue and add recurring agent
+      await queueManager.initialize();
+      const agentConfig = {
+        name: 'test-agent',
+        targetUrl: 'http://example.com',
+        method: 'POST' as const,
+        headers: { 'Content-Type': 'application/json' },
+        body: { test: 'data' },
+        timeout: 5000,
+        schedule: '0 */5 * * * *',
+        queue: 'default',
+      };
+      
+      await queueManager.addRecurringAgent(agentConfig);
+      
+      // Mock the queue to return repeatable job and recent job data
+      const queue = (queueManager as any).getOrCreateQueue('default');
+      (queue.getRepeatableJobs as any).mockResolvedValue([
+        { id: 'agent:test-agent', key: 'agent:test-agent', pattern: '0 */5 * * * *', next: Date.now() + 300000 },
+      ]);
+      (queue.getWaiting as any).mockResolvedValue([
+        { id: '1', name: 'test-agent', data: { agentName: 'test-agent', targetUrl: 'http://example.com', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { test: 'data' }, timeout: 5000 } },
+      ]);
+      
+      // Act
+      const result = await queueManager.getAgentStatus('test-agent');
+      
+      // Assert
+      expect(result).not.toBeNull();
+      expect(result?.name).toBe('test-agent');
+      expect(result?.targetUrl).toBe('http://example.com');
+      expect(result?.method).toBe('POST');
+      expect(result?.headers).toEqual({ 'Content-Type': 'application/json' });
+      expect(result?.body).toEqual({ test: 'data' });
+      expect(result?.timeout).toBe(5000);
+      expect(result?.schedule).toBe('0 */5 * * * *');
+      expect(result?.isActive).toBe(true);
+      expect(result?.queue).toBe('default');
+    });
+
+    it('should find agent by job name', async () => {
+      // Arrange: Create queue and add agent with job name matching
+      await queueManager.initialize();
+      const agentConfig = {
+        name: 'test-agent-name',
+        targetUrl: 'http://example.com',
+        schedule: '0 */5 * * * *',
+      };
+      
+      await queueManager.addRecurringAgent(agentConfig);
+      
+      // Mock the queue to return repeatable job
+      const queue = (queueManager as any).getOrCreateQueue('default');
+      (queue.getRepeatableJobs as any).mockResolvedValue([
+        { id: 'agent:test-agent-name', key: 'agent:test-agent-name', pattern: '0 */5 * * * *' },
+      ]);
+      
+      // Act
+      const result = await queueManager.getAgentStatus('test-agent-name');
+      
+      // Assert
+      expect(result).not.toBeNull();
+      expect(result?.name).toBe('test-agent-name');
+    });
+
+    it('should find agent by agentName in job data', async () => {
+      // Arrange: Create queue and add recurring agent (which uses agentName in data)
+      await queueManager.initialize();
+      const recurringConfig = {
+        name: 'test-agent-data',
+        targetUrl: 'http://example.com',
+        schedule: '0 */5 * * * *',
+      };
+      
+      await queueManager.addRecurringAgent(recurringConfig);
+      
+      // Mock the queue to return jobs with agentName in data
+      const queue = (queueManager as any).getOrCreateQueue('default');
+      (queue.getWaiting as any).mockResolvedValue([
+        { id: '1', name: 'test-agent-data', data: { agentName: 'test-agent-data', targetUrl: 'http://example.com' } },
+      ]);
+      
+      const result = await queueManager.getAgentStatus('test-agent-data');
+      
+      // Assert
+      expect(result).not.toBeNull();
+      expect(result?.name).toBe('test-agent-data');
+    });
+  });
+
+  describe('findAgentQueue', () => {
+    it('should find queue containing agent', async () => {
+      // Arrange: Create queue and add agent
+      await queueManager.initialize();
+      const agentConfig = {
+        name: 'test-agent-queue',
+        targetUrl: 'http://example.com',
+        schedule: '0 */5 * * * *',
+        queue: 'default',
+      };
+      
+      await queueManager.addRecurringAgent(agentConfig);
+      
+      // Mock getRepeatableJobs to return the agent job
+      const queue = (queueManager as any).getOrCreateQueue('default');
+      (queue.getRepeatableJobs as any).mockResolvedValue([
+        { id: 'agent:test-agent-queue', key: 'agent:test-agent-queue', pattern: '0 */5 * * * *' },
+      ]);
+      
+      // Act
+      const result = await (queueManager as any).findAgentQueue('test-agent-queue');
+      
+      // Assert
+      expect(result).not.toBeNull();
+      expect(result?.queueName).toBe('default');
+    });
+
+    it('should return null when agent not in any queue', async () => {
+      // Arrange: Initialize but don't add any agents
+      await queueManager.initialize();
+      
+      // Act
+      const result = await (queueManager as any).findAgentQueue('non-existent-agent');
+      
+      // Assert
+      expect(result).toBeNull();
+    });
+  });
+
   describe('getOrCreateQueue', () => {
     it('should create new queue with correct concurrency settings', async () => {
       // Arrange: Queue name that doesn't exist
