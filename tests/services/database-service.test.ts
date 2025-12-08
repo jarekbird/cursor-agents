@@ -140,6 +140,19 @@ describe('DatabaseService', () => {
       // Assert
       expect(result).toBe(true);
     });
+
+    it('should return false when setting exists with value 0', () => {
+      // Arrange: Insert setting with value 0
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`INSERT INTO system_settings (name, value) VALUES ('test_setting', 0)`);
+      setupDb.close();
+      
+      // Act
+      const result = dbService.isSystemSettingEnabled('test_setting');
+      
+      // Assert
+      expect(result).toBe(false);
+    });
   });
 });
 
