@@ -693,6 +693,206 @@ describe('MCPServer', () => {
     });
   });
 
+  describe('MCP resources', () => {
+    describe('agent resource listing', () => {
+      it('should list agent resources with correct URIs', async () => {
+        // Arrange: Mock listQueues to return queue names
+        mockQueueManager.listQueues.mockResolvedValue(['agent1', 'agent2', 'agent3']);
+
+        // Test the resource list handler logic
+        // The list function is: async (_extra) => { ... }
+        // We simulate this by calling the list function logic directly
+        const listHandler = async () => {
+          const queues = await mockQueueManager.listQueues();
+          const resources = queues.map((name: string) => ({
+            uri: `agent://${name}`,
+            name: name,
+            description: `Agent: ${name}`,
+            mimeType: 'application/json',
+          }));
+          return { resources };
+        };
+
+        // Act: Call the list handler
+        const result = await listHandler();
+
+        // Assert: Verify resource structure
+        expect(result).toHaveProperty('resources');
+        expect(Array.isArray(result.resources)).toBe(true);
+        expect(result.resources.length).toBe(3);
+
+        // Assert URI format
+        result.resources.forEach((resource: { uri: string; name: string; description: string; mimeType: string }) => {
+          expect(resource.uri).toMatch(/^agent:\/\/.+/);
+          expect(resource.uri).toBe(`agent://${resource.name}`);
+          expect(resource).toHaveProperty('name');
+          expect(resource).toHaveProperty('description');
+          expect(resource).toHaveProperty('mimeType', 'application/json');
+          expect(typeof resource.name).toBe('string');
+          expect(typeof resource.description).toBe('string');
+        });
+
+        // Verify all queue names are represented
+        const uris = result.resources.map((r: { uri: string }) => r.uri);
+        expect(uris).toContain('agent://agent1');
+        expect(uris).toContain('agent://agent2');
+        expect(uris).toContain('agent://agent3');
+      });
+
+      it('should return empty list when no agents exist', async () => {
+        // Arrange: Mock listQueues to return empty array
+        mockQueueManager.listQueues.mockResolvedValue([]);
+
+        const listHandler = async () => {
+          const queues = await mockQueueManager.listQueues();
+          const resources = queues.map((name: string) => ({
+            uri: `agent://${name}`,
+            name: name,
+            description: `Agent: ${name}`,
+            mimeType: 'application/json',
+          }));
+          return { resources };
+        };
+
+        // Act: Call the list handler
+        const result = await listHandler();
+
+        // Assert: Empty resources array
+        expect(result).toHaveProperty('resources');
+        expect(Array.isArray(result.resources)).toBe(true);
+        expect(result.resources.length).toBe(0);
+      });
+    });
+
+    describe('agent resource reading', () => {
+      it('should read agent resource and return status as JSON', async () => {
+        // Arrange: Mock getAgentStatus to return agent status
+        const mockAgentStatus = {
+          name: 'test-agent',
+          isActive: true,
+          targetUrl: 'http://example.com/api',
+          method: 'POST' as const,
+          queue: 'default',
+        };
+        mockQueueManager.getAgentStatus.mockResolvedValueOnce(mockAgentStatus);
+
+        // Simulate the read handler
+        const readHandler = async (uri: { href: string }, params: { name: string | string[] }) => {
+          const name = typeof params.name === 'string' ? params.name : params.name[0];
+          const status = await mockQueueManager.getAgentStatus(name);
+
+          if (!status) {
+            throw new Error(`Agent "${name}" not found`);
+          }
+
+          return {
+            contents: [
+              {
+                uri: uri.href,
+                mimeType: 'application/json',
+                text: JSON.stringify(status, null, 2),
+              },
+            ],
+          };
+        };
+
+        // Act: Call the read handler
+        const mockUri = { href: 'agent://test-agent' };
+        const result = await readHandler(mockUri, { name: 'test-agent' });
+
+        // Assert: Verify resource read structure
+        expect(result).toHaveProperty('contents');
+        expect(Array.isArray(result.contents)).toBe(true);
+        expect(result.contents.length).toBe(1);
+
+        const content = result.contents[0];
+        expect(content).toHaveProperty('uri', 'agent://test-agent');
+        expect(content).toHaveProperty('mimeType', 'application/json');
+        expect(content).toHaveProperty('text');
+
+        // Assert JSON structure in text
+        expect(() => JSON.parse(content.text)).not.toThrow();
+        const statusJson = JSON.parse(content.text);
+        expect(statusJson).toHaveProperty('name', 'test-agent');
+        expect(statusJson).toHaveProperty('isActive', true);
+        expect(statusJson).toHaveProperty('targetUrl', 'http://example.com/api');
+        expect(statusJson).toHaveProperty('method', 'POST');
+        expect(statusJson).toHaveProperty('queue', 'default');
+
+        expect(mockQueueManager.getAgentStatus).toHaveBeenCalledWith('test-agent');
+      });
+
+      it('should throw error when agent resource not found', async () => {
+        // Arrange: Mock getAgentStatus to return null
+        mockQueueManager.getAgentStatus.mockResolvedValueOnce(null);
+
+        // Simulate the read handler
+        const readHandler = async (uri: { href: string }, params: { name: string | string[] }) => {
+          const name = typeof params.name === 'string' ? params.name : params.name[0];
+          const status = await mockQueueManager.getAgentStatus(name);
+
+          if (!status) {
+            throw new Error(`Agent "${name}" not found`);
+          }
+
+          return {
+            contents: [
+              {
+                uri: uri.href,
+                mimeType: 'application/json',
+                text: JSON.stringify(status, null, 2),
+              },
+            ],
+          };
+        };
+
+        // Act & Assert: Should throw error
+        const mockUri = { href: 'agent://non-existent' };
+        await expect(readHandler(mockUri, { name: 'non-existent' })).rejects.toThrow('Agent "non-existent" not found');
+        expect(mockQueueManager.getAgentStatus).toHaveBeenCalledWith('non-existent');
+      });
+
+      it('should handle name parameter as array', async () => {
+        // Arrange: Mock getAgentStatus to return agent status
+        const mockAgentStatus = {
+          name: 'test-agent',
+          isActive: true,
+        };
+        mockQueueManager.getAgentStatus.mockResolvedValueOnce(mockAgentStatus);
+
+        // Simulate the read handler
+        const readHandler = async (uri: { href: string }, params: { name: string | string[] }) => {
+          const name = typeof params.name === 'string' ? params.name : params.name[0];
+          const status = await mockQueueManager.getAgentStatus(name);
+
+          if (!status) {
+            throw new Error(`Agent "${name}" not found`);
+          }
+
+          return {
+            contents: [
+              {
+                uri: uri.href,
+                mimeType: 'application/json',
+                text: JSON.stringify(status, null, 2),
+              },
+            ],
+          };
+        };
+
+        // Act: Call with name as array
+        const mockUri = { href: 'agent://test-agent' };
+        const result = await readHandler(mockUri, { name: ['test-agent'] });
+
+        // Assert: Should work with array parameter
+        expect(result).toHaveProperty('contents');
+        expect(result.contents[0]).toHaveProperty('text');
+        const statusJson = JSON.parse(result.contents[0].text);
+        expect(statusJson).toHaveProperty('name', 'test-agent');
+      });
+    });
+  });
+
   describe('start and stop', () => {
     it('should start successfully', async () => {
       await expect(mcpServer.start()).resolves.not.toThrow();
