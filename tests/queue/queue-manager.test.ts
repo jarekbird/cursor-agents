@@ -471,6 +471,116 @@ describe('QueueManager', () => {
     });
   });
 
+  describe('addDelayedAgent', () => {
+    it('should add delayed job for non-task-operator queue', async () => {
+      // Arrange: Non-task-operator queue
+      const config = {
+        name: 'test-agent',
+        targetUrl: 'http://example.com',
+        method: 'POST' as const,
+        delay: 5000,
+      };
+      const queueName = 'default';
+      
+      // Ensure queue exists
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      jest.clearAllMocks();
+      
+      // Act
+      const result = await queueManager.addDelayedAgent(config);
+      
+      // Assert
+      expect(result).toBeDefined();
+      expect(result?.id).toBe('job-123');
+      expect(result?.name).toBe('test-agent');
+      expect(queue.add).toHaveBeenCalledWith(
+        'test-agent',
+        expect.objectContaining({
+          agentName: 'test-agent',
+          targetUrl: 'http://example.com',
+          method: 'POST',
+        }),
+        expect.objectContaining({
+          delay: 5000,
+        })
+      );
+    });
+
+    it('should return null and log skip for task-operator when jobs exist', async () => {
+      // Arrange: task-operator queue, hasExistingJobs returns true
+      const queueName = 'task-operator';
+      const config = {
+        name: 'task-operator',
+        targetUrl: 'task-operator://internal',
+        delay: 5000,
+        queue: queueName,
+      };
+      
+      // Ensure queue exists
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock hasExistingJobs to return true
+      const hasExistingJobsSpy = jest.spyOn(queueManager, 'hasExistingJobs').mockResolvedValue(true);
+      const loggerDebugSpy = jest.spyOn(logger, 'debug');
+      
+      jest.clearAllMocks();
+      
+      // Act
+      const result = await queueManager.addDelayedAgent(config);
+      
+      // Assert
+      expect(result).toBeNull();
+      expect(hasExistingJobsSpy).toHaveBeenCalledWith('task-operator', queueName, true);
+      expect(loggerDebugSpy).toHaveBeenCalled();
+      expect(queue.add).not.toHaveBeenCalled();
+      
+      // Cleanup
+      hasExistingJobsSpy.mockRestore();
+      loggerDebugSpy.mockRestore();
+    });
+
+    it('should add delayed job for task-operator when no jobs exist', async () => {
+      // Arrange: task-operator queue, hasExistingJobs returns false
+      const queueName = 'task-operator';
+      const config = {
+        name: 'task-operator',
+        targetUrl: 'task-operator://internal',
+        delay: 5000,
+        queue: queueName,
+      };
+      
+      // Ensure queue exists
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock hasExistingJobs to return false
+      const hasExistingJobsSpy = jest.spyOn(queueManager, 'hasExistingJobs').mockResolvedValue(false);
+      
+      jest.clearAllMocks();
+      
+      // Act
+      const result = await queueManager.addDelayedAgent(config);
+      
+      // Assert
+      expect(result).toBeDefined();
+      expect(result?.id).toBe('job-123');
+      expect(result?.name).toBe('task-operator');
+      expect(hasExistingJobsSpy).toHaveBeenCalledWith('task-operator', queueName, true);
+      expect(queue.add).toHaveBeenCalledWith(
+        'task-operator',
+        expect.objectContaining({
+          agentName: 'task-operator',
+          targetUrl: 'task-operator://internal',
+        }),
+        expect.objectContaining({
+          delay: 5000,
+        })
+      );
+      
+      // Cleanup
+      hasExistingJobsSpy.mockRestore();
+    });
+  });
+
   describe('getOrCreateQueue', () => {
     it('should create new queue with correct concurrency settings', async () => {
       // Arrange: Queue name that doesn't exist
