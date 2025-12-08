@@ -174,6 +174,158 @@ describe('TaskOperatorService', () => {
       getNextReadyTaskSpy.mockRestore();
       releaseLockSpy.mockRestore();
     });
+
+    it('should process task successfully through happy path', async () => {
+      // Arrange: Comprehensive mocks for happy path
+      const sampleTask = { id: 1, prompt: 'test prompt', order: 0, uuid: 'test-uuid', status: 0 };
+      mockRedis.set = jest.fn<() => Promise<string | null>>().mockResolvedValue('OK');
+      
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Mock database service methods
+      const getNextReadyTaskSpy = jest.spyOn(dbService, 'getNextReadyTask').mockReturnValue(sampleTask);
+      const updateTaskStatusSpy = jest.spyOn(dbService, 'updateTaskStatus').mockReturnValue(true);
+      
+      // Mock fetch for conversation creation and async iterate
+      const fetchMock = jest.fn<typeof fetch>();
+      fetchMock
+        .mockResolvedValueOnce({ // Conversation creation
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify({ conversationId: 'conv-123', success: true })),
+        } as Response)
+        .mockResolvedValueOnce({ // Async iterate
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify({ success: true })),
+        } as Response);
+      global.fetch = fetchMock as typeof fetch;
+      
+      // Mock cleanupStaleTasks to avoid issues
+      const cleanupSpy = jest.spyOn(service as any, 'cleanupStaleTasks').mockResolvedValue(undefined);
+      
+      // Act
+      const result = await service.processNextTask();
+      
+      // Assert: Returns success
+      expect(result).toEqual({ processed: true, taskId: 1 });
+      expect(getNextReadyTaskSpy).toHaveBeenCalled();
+      expect(updateTaskStatusSpy).toHaveBeenCalledWith(1, 4); // IN_PROGRESS
+      
+      // Verify pending task entry was stored
+      const pendingTasks = (service as any).pendingTasks;
+      expect(pendingTasks.size).toBeGreaterThan(0);
+      
+      // Verify lock was NOT released (callback will release it)
+      expect(mockRedis.del).not.toHaveBeenCalled();
+      
+      // Cleanup
+      getNextReadyTaskSpy.mockRestore();
+      updateTaskStatusSpy.mockRestore();
+      cleanupSpy.mockRestore();
+    });
+
+    it('should reset task to ready and release lock when conversation creation fails', async () => {
+      // Arrange: Mock conversation creation to fail
+      const sampleTask = { id: 1, prompt: 'test prompt', order: 0, uuid: 'test-uuid', status: 0 };
+      mockRedis.set = jest.fn<() => Promise<string | null>>().mockResolvedValue('OK');
+      
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Mock database service methods
+      const getNextReadyTaskSpy = jest.spyOn(dbService, 'getNextReadyTask').mockReturnValue(sampleTask);
+      const updateTaskStatusSpy = jest.spyOn(dbService, 'updateTaskStatus').mockReturnValue(true);
+      
+      // Mock fetch to fail for conversation creation (both attempts)
+      const fetchMock = jest.fn<typeof fetch>();
+      fetchMock
+        .mockRejectedValueOnce(new Error('Connection failed'))
+        .mockRejectedValueOnce(new Error('Connection failed'));
+      global.fetch = fetchMock as typeof fetch;
+      
+      // Mock cleanupStaleTasks
+      const cleanupSpy = jest.spyOn(service as any, 'cleanupStaleTasks').mockResolvedValue(undefined);
+      const releaseLockSpy = jest.spyOn(service as any, 'releaseLock').mockResolvedValue(undefined);
+      
+      // Act
+      const result = await service.processNextTask();
+      
+      // Assert: Returns error
+      expect(result).toEqual({
+        processed: false,
+        taskId: 1,
+        error: expect.stringContaining('Failed to create new conversation'),
+        reason: 'error',
+      });
+      expect(updateTaskStatusSpy).toHaveBeenCalledWith(1, 4); // IN_PROGRESS first
+      expect(updateTaskStatusSpy).toHaveBeenCalledWith(1, 0); // Reset to ready
+      expect(releaseLockSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      getNextReadyTaskSpy.mockRestore();
+      updateTaskStatusSpy.mockRestore();
+      cleanupSpy.mockRestore();
+      releaseLockSpy.mockRestore();
+    });
+
+    it('should remove pending task and reset status when async iterate fails', async () => {
+      // Arrange: Mock async iterate to fail
+      const sampleTask = { id: 1, prompt: 'test prompt', order: 0, uuid: 'test-uuid', status: 0 };
+      mockRedis.set = jest.fn<() => Promise<string | null>>().mockResolvedValue('OK');
+      
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Mock database service methods
+      const getNextReadyTaskSpy = jest.spyOn(dbService, 'getNextReadyTask').mockReturnValue(sampleTask);
+      const updateTaskStatusSpy = jest.spyOn(dbService, 'updateTaskStatus').mockReturnValue(true);
+      
+      // Mock fetch: conversation creation succeeds, async iterate fails
+      const fetchMock = jest.fn<typeof fetch>();
+      fetchMock
+        .mockResolvedValueOnce({ // Conversation creation succeeds
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify({ conversationId: 'conv-123', success: true })),
+        } as Response)
+        .mockResolvedValueOnce({ // Async iterate fails
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          text: () => Promise.resolve('Internal Server Error'),
+        } as Response);
+      global.fetch = fetchMock as typeof fetch;
+      
+      // Mock cleanupStaleTasks
+      const cleanupSpy = jest.spyOn(service as any, 'cleanupStaleTasks').mockResolvedValue(undefined);
+      const releaseLockSpy = jest.spyOn(service as any, 'releaseLock').mockResolvedValue(undefined);
+      
+      // Act
+      const result = await service.processNextTask();
+      
+      // Assert: Returns error
+      expect(result).toEqual({
+        processed: false,
+        taskId: 1,
+        error: expect.stringContaining('Cursor runner returned 500'),
+        reason: 'error',
+      });
+      
+      // Verify pending task was removed
+      const pendingTasks = (service as any).pendingTasks;
+      expect(pendingTasks.size).toBe(0);
+      
+      // Verify task status was reset to ready
+      expect(updateTaskStatusSpy).toHaveBeenCalledWith(1, 0);
+      
+      // Verify lock was released
+      expect(releaseLockSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      getNextReadyTaskSpy.mockRestore();
+      updateTaskStatusSpy.mockRestore();
+      cleanupSpy.mockRestore();
+      releaseLockSpy.mockRestore();
+    });
   });
 });
 
