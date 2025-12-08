@@ -50,6 +50,10 @@ describe('CursorAgentsApp', () => {
       removeRecurringPrompt: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       getQueues: jest.fn<() => unknown[]>().mockReturnValue([]),
       getQueueInfo: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+      addOneTimeAgent: jest.fn<() => Promise<{ id: string; name: string }>>().mockResolvedValue({ id: 'job-1', name: 'test-agent' }),
+      addRecurringAgent: jest.fn<() => Promise<{ id: string; name: string }>>().mockResolvedValue({ id: 'job-1', name: 'test-agent' }),
+      getAgentStatus: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+      removeAgent: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<QueueManager>;
 
@@ -201,6 +205,214 @@ describe('CursorAgentsApp', () => {
       // Assert
       expect(response.body).toHaveProperty('error');
       expect(response.body.error).toContain('jobs');
+    });
+  });
+
+  describe('POST /agents', () => {
+    it('should return 400 when name is missing', async () => {
+      await app.initialize();
+
+      const response = await request(app.app)
+        .post('/agents')
+        .send({ targetUrl: 'http://example.com' })
+        .expect(400);
+
+      expect(response.body.error).toContain('Missing required fields');
+    });
+
+    it('should return 400 when targetUrl is missing', async () => {
+      await app.initialize();
+
+      const response = await request(app.app)
+        .post('/agents')
+        .send({ name: 'test-agent' })
+        .expect(400);
+
+      expect(response.body.error).toContain('Missing required fields');
+    });
+
+    it('should return 400 when oneTime=false and no schedule', async () => {
+      await app.initialize();
+
+      const response = await request(app.app)
+        .post('/agents')
+        .send({ name: 'test-agent', targetUrl: 'http://example.com', oneTime: false })
+        .expect(400);
+
+      expect(response.body.error).toContain('schedule must be provided');
+    });
+
+    it('should create one-time agent with defaults', async () => {
+      await app.initialize();
+
+      const response = await request(app.app)
+        .post('/agents')
+        .send({ name: 'test-agent', targetUrl: 'http://example.com', oneTime: true })
+        .expect(200);
+
+      expect(response.body).toEqual({
+        success: true,
+        message: expect.stringContaining('test-agent'),
+        agent: expect.objectContaining({
+          name: 'test-agent',
+          targetUrl: 'http://example.com',
+          method: 'POST',
+          oneTime: true,
+          queue: 'default',
+        }),
+      });
+      expect(mockQueueManager.addOneTimeAgent).toHaveBeenCalled();
+    });
+
+    it('should create recurring agent with schedule', async () => {
+      await app.initialize();
+
+      const response = await request(app.app)
+        .post('/agents')
+        .send({
+          name: 'test-agent',
+          targetUrl: 'http://example.com',
+          schedule: '0 */5 * * * *',
+        })
+        .expect(200);
+
+      expect(response.body).toEqual({
+        success: true,
+        message: expect.stringContaining('test-agent'),
+        agent: expect.objectContaining({
+          name: 'test-agent',
+          targetUrl: 'http://example.com',
+          method: 'POST',
+          schedule: '0 */5 * * * *',
+          queue: 'default',
+        }),
+      });
+      expect(mockQueueManager.addRecurringAgent).toHaveBeenCalled();
+    });
+
+    it('should return 500 when queue method rejects', async () => {
+      mockQueueManager.addOneTimeAgent.mockRejectedValueOnce(new Error('Queue error'));
+
+      await app.initialize();
+
+      const response = await request(app.app)
+        .post('/agents')
+        .send({ name: 'test-agent', targetUrl: 'http://example.com', oneTime: true })
+        .expect(500);
+
+      expect(response.body).toHaveProperty('error', 'Failed to create agent');
+    });
+  });
+
+  describe('GET /agents', () => {
+    it('should list all agents and filter null values', async () => {
+      // Arrange: Mock listQueues and getAgentStatus to return queue objects
+      // Note: getAgentStatus is called with queue names, not agent names
+      mockQueueManager.listQueues.mockResolvedValueOnce(['queue1', 'queue2']);
+      mockQueueManager.getAgentStatus
+        .mockResolvedValueOnce({ name: 'agent1', isActive: true } as any)
+        .mockResolvedValueOnce(null); // This should be filtered out
+
+      await app.initialize();
+
+      // Act: GET /agents
+      const response = await request(app.app).get('/agents');
+
+      // Assert: 200, agents array without nulls
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('agents');
+      expect(response.body.agents).toHaveLength(1);
+      expect(response.body.agents[0]).toEqual({ name: 'agent1', isActive: true });
+    });
+
+    it('should return 500 when listQueues rejects', async () => {
+      mockQueueManager.listQueues.mockRejectedValueOnce(new Error('Redis error'));
+
+      await app.initialize();
+
+      const response = await request(app.app).get('/agents');
+
+      expect(response.status).toBe(500);
+      expect(response.body).toHaveProperty('error', 'Failed to list agents');
+    });
+  });
+
+  describe('GET /agents/:name', () => {
+    it('should return agent status when agent exists', async () => {
+      // Arrange: Mock getAgentStatus to return status object
+      const mockStatus = { name: 'test-agent', isActive: true, targetUrl: 'http://example.com' };
+      mockQueueManager.getAgentStatus.mockResolvedValueOnce(mockStatus as any);
+
+      await app.initialize();
+
+      // Act: GET /agents/test
+      const response = await request(app.app).get('/agents/test-agent');
+
+      // Assert: 200, status JSON
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(mockStatus);
+    });
+
+    it('should return 404 when agent not found', async () => {
+      // Arrange: getAgentStatus returns null
+      mockQueueManager.getAgentStatus.mockResolvedValueOnce(null);
+
+      await app.initialize();
+
+      // Act: GET /agents/non-existent
+      const response = await request(app.app).get('/agents/non-existent');
+
+      // Assert: 404, message "Agent \"non-existent\" not found"
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: 'Agent "non-existent" not found' });
+    });
+
+    it('should return 500 when getAgentStatus throws', async () => {
+      // Arrange: getAgentStatus throws
+      mockQueueManager.getAgentStatus.mockRejectedValueOnce(new Error('Database error'));
+
+      await app.initialize();
+
+      // Act: GET /agents/test
+      const response = await request(app.app).get('/agents/test');
+
+      // Assert: 500, error message
+      expect(response.status).toBe(500);
+      expect(response.body).toHaveProperty('error', 'Failed to get agent status');
+    });
+  });
+
+  describe('DELETE /agents/:name', () => {
+    it('should delete agent successfully', async () => {
+      // Arrange: Mock removeAgent to resolve
+      await app.initialize();
+
+      // Act: DELETE /agents/test
+      const response = await request(app.app)
+        .delete('/agents/test-agent')
+        .expect(200);
+
+      // Assert: 200, success
+      expect(response.body).toEqual({
+        success: true,
+        message: expect.stringContaining('test-agent'),
+      });
+      expect(mockQueueManager.removeAgent).toHaveBeenCalledWith('test-agent');
+    });
+
+    it('should return 500 when removeAgent throws', async () => {
+      // Arrange: removeAgent throws error
+      mockQueueManager.removeAgent.mockRejectedValueOnce(new Error('Agent not found'));
+
+      await app.initialize();
+
+      // Act: DELETE /agents/test
+      const response = await request(app.app)
+        .delete('/agents/test-agent')
+        .expect(500);
+
+      // Assert: 500, error message
+      expect(response.body).toHaveProperty('error', 'Failed to delete agent');
     });
   });
 
