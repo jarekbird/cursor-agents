@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { TaskOperatorService } from '../../src/services/task-operator-service.js';
 import { DatabaseService } from '../../src/services/database-service.js';
+import { logger } from '../../src/logger.js';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { unlinkSync } from 'fs';
@@ -442,6 +443,140 @@ describe('TaskOperatorService', () => {
       expect(releaseLockSpy).toHaveBeenCalled();
       
       // Cleanup
+      updateTaskStatusSpy.mockRestore();
+      releaseLockSpy.mockRestore();
+    });
+  });
+
+  describe('isProcessing', () => {
+    it('should return true when lock exists', async () => {
+      // Arrange: Mock Redis exists to return 1
+      mockRedis.exists = jest.fn<() => Promise<number>>().mockResolvedValue(1);
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      
+      // Act
+      const result = await service.isProcessing();
+      
+      // Assert
+      expect(result).toBe(true);
+      expect(mockRedis.exists).toHaveBeenCalledWith('task_operator:lock');
+    });
+    
+    it('should return false when lock does not exist', async () => {
+      // Arrange: Mock Redis exists to return 0
+      mockRedis.exists = jest.fn<() => Promise<number>>().mockResolvedValue(0);
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      
+      // Act
+      const result = await service.isProcessing();
+      
+      // Assert
+      expect(result).toBe(false);
+      expect(mockRedis.exists).toHaveBeenCalledWith('task_operator:lock');
+    });
+  });
+
+  describe('clearLock', () => {
+    it('should return true and log when lock is removed', async () => {
+      // Arrange: Mock Redis del to return 1
+      mockRedis.del = jest.fn<() => Promise<number>>().mockResolvedValue(1);
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const loggerInfoSpy = jest.spyOn(logger, 'info');
+      
+      // Act
+      const result = await service.clearLock();
+      
+      // Assert
+      expect(result).toBe(true);
+      expect(mockRedis.del).toHaveBeenCalledWith('task_operator:lock');
+      expect(loggerInfoSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      loggerInfoSpy.mockRestore();
+    });
+    
+    it('should return false and log when lock does not exist', async () => {
+      // Arrange: Mock Redis del to return 0
+      mockRedis.del = jest.fn<() => Promise<number>>().mockResolvedValue(0);
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const loggerInfoSpy = jest.spyOn(logger, 'info');
+      
+      // Act
+      const result = await service.clearLock();
+      
+      // Assert
+      expect(result).toBe(false);
+      expect(mockRedis.del).toHaveBeenCalledWith('task_operator:lock');
+      expect(loggerInfoSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      loggerInfoSpy.mockRestore();
+    });
+  });
+
+  describe('cleanupStaleTasks', () => {
+    it('should reset stale IN_PROGRESS tasks to ready and remove from map', async () => {
+      // Arrange: Stale tasks with old timestamps
+      const staleTimestamp = Date.now() - 2 * 60 * 60 * 1000; // 2 hours ago
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Seed pendingTasks with stale entries
+      const pendingTasks = (service as any).pendingTasks;
+      pendingTasks.set('req-1', { taskId: 1, requestId: 'req-1', timestamp: staleTimestamp });
+      pendingTasks.set('req-2', { taskId: 2, requestId: 'req-2', timestamp: staleTimestamp });
+      
+      // Mock database service
+      const getTaskStatusSpy = jest.spyOn(dbService, 'getTaskStatus')
+        .mockReturnValueOnce(4) // IN_PROGRESS for task 1
+        .mockReturnValueOnce(1); // COMPLETE for task 2
+      const updateTaskStatusSpy = jest.spyOn(dbService, 'updateTaskStatus').mockReturnValue(true);
+      
+      // Act: Call cleanupStaleTasks (private method, access via any)
+      await (service as any).cleanupStaleTasks();
+      
+      // Assert
+      expect(getTaskStatusSpy).toHaveBeenCalledWith(1);
+      expect(getTaskStatusSpy).toHaveBeenCalledWith(2);
+      expect(updateTaskStatusSpy).toHaveBeenCalledWith(1, 0); // Reset task 1 to ready
+      expect(updateTaskStatusSpy).not.toHaveBeenCalledWith(2, expect.anything()); // Task 2 not reset
+      expect(pendingTasks.has('req-1')).toBe(false); // Removed
+      expect(pendingTasks.has('req-2')).toBe(false); // Removed
+      
+      // Cleanup
+      getTaskStatusSpy.mockRestore();
+      updateTaskStatusSpy.mockRestore();
+    });
+
+    it('should release lock when no pending tasks remain after cleanup', async () => {
+      // Arrange: Single stale task, lock exists
+      const staleTimestamp = Date.now() - 2 * 60 * 60 * 1000; // 2 hours ago
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Seed pendingTasks with single stale entry
+      const pendingTasks = (service as any).pendingTasks;
+      pendingTasks.set('req-1', { taskId: 1, requestId: 'req-1', timestamp: staleTimestamp });
+      
+      // Mock database service
+      const getTaskStatusSpy = jest.spyOn(dbService, 'getTaskStatus').mockReturnValue(4); // IN_PROGRESS
+      const updateTaskStatusSpy = jest.spyOn(dbService, 'updateTaskStatus').mockReturnValue(true);
+      
+      // Mock lock exists
+      mockRedis.exists = jest.fn<() => Promise<number>>().mockResolvedValue(1);
+      
+      // Mock releaseLock
+      const releaseLockSpy = jest.spyOn(service as any, 'releaseLock').mockResolvedValue(undefined);
+      
+      // Act: cleanupStaleTasks (private method, access via any)
+      await (service as any).cleanupStaleTasks();
+      
+      // Assert: releaseLock called
+      expect(releaseLockSpy).toHaveBeenCalled();
+      expect(pendingTasks.has('req-1')).toBe(false); // Removed
+      
+      // Cleanup
+      getTaskStatusSpy.mockRestore();
       updateTaskStatusSpy.mockRestore();
       releaseLockSpy.mockRestore();
     });
