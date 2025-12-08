@@ -767,6 +767,74 @@ describe('QueueManager', () => {
     });
   });
 
+  describe('deleteQueue', () => {
+    it('should throw error when queue is not found', async () => {
+      // Arrange: Queue name that doesn't exist
+      await queueManager.initialize();
+      
+      // Act & Assert
+      await expect(queueManager.deleteQueue('non-existent-queue')).rejects.toThrow('Queue "non-existent-queue" not found');
+    });
+
+    it('should throw error when attempting to delete default queue', async () => {
+      // Arrange: Default queue - create it first
+      await queueManager.initialize();
+      (queueManager as any).getOrCreateQueue('default');
+      
+      // Mock queue to be empty
+      const queue = (queueManager as any).getOrCreateQueue('default');
+      (queue.getWaitingCount as any).mockResolvedValue(0);
+      (queue.getActiveCount as any).mockResolvedValue(0);
+      (queue.getDelayedCount as any).mockResolvedValue(0);
+      (queue.getRepeatableJobs as any).mockResolvedValue([]);
+      
+      // Act & Assert
+      await expect(queueManager.deleteQueue('default')).rejects.toThrow('Cannot delete the default queue');
+    });
+
+    it('should throw error when queue has jobs', async () => {
+      // Arrange: Queue with jobs
+      const queueName = 'queue-with-jobs';
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock queue to have jobs
+      (queue.getWaitingCount as any).mockResolvedValue(1);
+      (queue.getActiveCount as any).mockResolvedValue(0);
+      (queue.getDelayedCount as any).mockResolvedValue(0);
+      (queue.getRepeatableJobs as any).mockResolvedValue([]);
+      
+      // Act & Assert
+      await expect(queueManager.deleteQueue(queueName)).rejects.toThrow('it still has jobs');
+    });
+
+    it('should close resources and remove queue when empty', async () => {
+      // Arrange: Empty non-default queue
+      const queueName = 'empty-queue';
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      const worker = (queueManager as any).workers.get(queueName);
+      const queueEvents = (queueManager as any).queueEvents.get(queueName);
+      
+      // Mock queue to be empty
+      (queue.getWaitingCount as any).mockResolvedValue(0);
+      (queue.getActiveCount as any).mockResolvedValue(0);
+      (queue.getDelayedCount as any).mockResolvedValue(0);
+      (queue.getRepeatableJobs as any).mockResolvedValue([]);
+      
+      // Act
+      await queueManager.deleteQueue(queueName);
+      
+      // Assert: All resources closed
+      expect(worker.close).toHaveBeenCalled();
+      expect(queueEvents.close).toHaveBeenCalled();
+      expect(queue.close).toHaveBeenCalled();
+      
+      // Assert: Queue removed from maps
+      expect((queueManager as any).queues.has(queueName)).toBe(false);
+      expect((queueManager as any).workers.has(queueName)).toBe(false);
+      expect((queueManager as any).queueEvents.has(queueName)).toBe(false);
+    });
+  });
+
   describe('checkAndCleanupEmptyQueue', () => {
     it('should delete queue when it is empty', async () => {
       // Arrange: Non-default empty queue
