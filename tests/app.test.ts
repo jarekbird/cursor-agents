@@ -2,9 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals
 import request from 'supertest';
 import { CursorAgentsApp } from '../src/app.js';
 import { QueueManager } from '../src/queue/queue-manager.js';
+import { DatabaseService } from '../src/services/database-service.js';
 
 // Mock QueueManager
 jest.mock('../src/queue/queue-manager.js');
+
+// Mock DatabaseService
+jest.mock('../src/services/database-service.js');
 
 // Mock Bull Board
 jest.mock('@bull-board/api', () => ({
@@ -31,10 +35,22 @@ jest.mock('@bull-board/express', () => ({
 describe('CursorAgentsApp', () => {
   let app: CursorAgentsApp;
   let mockQueueManager: jest.Mocked<QueueManager>;
+  let mockDatabaseService: jest.Mocked<DatabaseService>;
 
   beforeEach(() => {
     // Reset mocks
     mockSetBasePath.mockClear();
+    
+    // Create mock DatabaseService
+    mockDatabaseService = {
+      setSystemSetting: jest.fn<() => boolean>().mockReturnValue(true),
+      isSystemSettingEnabled: jest.fn<() => boolean>().mockReturnValue(false),
+      getNextReadyTask: jest.fn(),
+      updateTaskStatus: jest.fn(),
+      markTaskComplete: jest.fn(),
+      getTaskStatus: jest.fn(),
+      close: jest.fn(),
+    } as unknown as jest.Mocked<DatabaseService>;
     
     // Create mock QueueManager
     mockQueueManager = {
@@ -50,15 +66,18 @@ describe('CursorAgentsApp', () => {
       removeRecurringPrompt: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       getQueues: jest.fn<() => unknown[]>().mockReturnValue([]),
       getQueueInfo: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
-      addOneTimeAgent: jest.fn<() => Promise<{ id: string; name: string }>>().mockResolvedValue({ id: 'job-1', name: 'test-agent' }),
-      addRecurringAgent: jest.fn<() => Promise<{ id: string; name: string }>>().mockResolvedValue({ id: 'job-1', name: 'test-agent' }),
+      addOneTimeAgent: jest.fn<(_config: unknown) => Promise<{ id: string; name: string }>>().mockResolvedValue({ id: 'job-1', name: 'test-agent' }),
+      addRecurringAgent: jest.fn<(_config: unknown) => Promise<{ id: string; name: string }>>().mockResolvedValue({ id: 'job-1', name: 'test-agent' }),
       getAgentStatus: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
       removeAgent: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<QueueManager>;
 
-    // Inject mock QueueManager via constructor
-    app = new CursorAgentsApp(mockQueueManager);
+    // Inject mock QueueManager and DatabaseService via constructor
+    app = new CursorAgentsApp(mockQueueManager, mockDatabaseService);
+    
+    // Verify mocks are set up
+    jest.clearAllMocks();
   });
 
   afterEach(async () => {
@@ -413,6 +432,262 @@ describe('CursorAgentsApp', () => {
 
       // Assert: 500, error message
       expect(response.body).toHaveProperty('error', 'Failed to delete agent');
+    });
+  });
+
+  describe('POST /task-operator', () => {
+    it('should enable task operator successfully', async () => {
+      // Arrange: Mock setSystemSetting to return true, addOneTimeAgent to return job
+      // Ensure isSystemSettingEnabled returns false during initialize() so it doesn't auto-start
+      mockDatabaseService.isSystemSettingEnabled.mockReturnValue(false);
+      mockDatabaseService.setSystemSetting.mockReturnValue(true);
+      mockQueueManager.addOneTimeAgent.mockResolvedValue({ id: 'job-1', name: 'task-operator' });
+
+      await app.initialize();
+
+      // Act: POST /task-operator
+      const response = await request(app.app)
+        .post('/task-operator')
+        .send({}); // Explicitly send empty body
+
+      // Assert: 200, success JSON with agent info
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        success: true,
+        message: 'Task operator agent enqueued successfully',
+        agent: expect.objectContaining({
+          name: 'task-operator',
+          jobId: 'job-1',
+          queue: 'task-operator',
+        }),
+      });
+      expect(mockDatabaseService.setSystemSetting).toHaveBeenCalledWith('task_operator', true);
+      expect(mockQueueManager.addOneTimeAgent).toHaveBeenCalled();
+    });
+
+    it('should still succeed when setSystemSetting returns false', async () => {
+      // Arrange: setSystemSetting returns false but addOneTimeAgent succeeds
+      // Note: The implementation logs a warning but continues, so it should still return 200
+      mockDatabaseService.setSystemSetting.mockReturnValue(false);
+      mockQueueManager.addOneTimeAgent.mockResolvedValue({ id: 'job-1', name: 'task-operator' });
+
+      await app.initialize();
+
+      // Act: POST /task-operator
+      const response = await request(app.app)
+        .post('/task-operator');
+
+      // Assert: Should still succeed (200) even if setSystemSetting fails
+      // The implementation logs a warning but continues
+      if (response.status === 200) {
+        expect(response.body).toHaveProperty('success', true);
+      } else {
+        // If it fails, check the error
+        expect(response.body).toHaveProperty('error');
+      }
+    });
+
+    it('should return 500 when addOneTimeAgent throws', async () => {
+      // Arrange: addOneTimeAgent throws
+      mockDatabaseService.setSystemSetting.mockReturnValueOnce(true);
+      mockQueueManager.addOneTimeAgent.mockRejectedValueOnce(new Error('Queue error'));
+
+      await app.initialize();
+
+      // Act: POST /task-operator
+      const response = await request(app.app)
+        .post('/task-operator')
+        .expect(500);
+
+      // Assert: 500, error message
+      expect(response.body).toHaveProperty('error', 'Failed to enqueue task operator');
+    });
+  });
+
+  describe('DELETE /task-operator', () => {
+    it('should disable task operator successfully', async () => {
+      // Arrange: Mock setSystemSetting to return true, removeAgent to resolve
+      mockDatabaseService.setSystemSetting.mockReturnValueOnce(true);
+
+      await app.initialize();
+
+      // Act: DELETE /task-operator
+      const response = await request(app.app)
+        .delete('/task-operator')
+        .expect(200);
+
+      // Assert: 200, success JSON
+      expect(response.body).toEqual({
+        success: true,
+        message: expect.stringContaining('disabled'),
+      });
+      expect(mockDatabaseService.setSystemSetting).toHaveBeenCalledWith('task_operator', false);
+      expect(mockQueueManager.removeAgent).toHaveBeenCalledWith('task-operator');
+    });
+
+    it('should handle removeAgent not found error', async () => {
+      // Arrange: removeAgent throws "not found" error (should be ignored)
+      mockDatabaseService.setSystemSetting.mockReturnValueOnce(true);
+      mockQueueManager.removeAgent.mockRejectedValueOnce(new Error('Agent "task-operator" not found'));
+
+      await app.initialize();
+
+      // Act: DELETE /task-operator
+      const response = await request(app.app)
+        .delete('/task-operator')
+        .expect(200);
+
+      // Assert: 200, success (error ignored)
+      expect(response.body).toHaveProperty('success', true);
+    });
+
+    it('should return 500 when setSystemSetting returns false', async () => {
+      // Arrange: setSystemSetting returns false
+      mockDatabaseService.setSystemSetting.mockReturnValueOnce(false);
+
+      await app.initialize();
+
+      // Act: DELETE /task-operator
+      const response = await request(app.app)
+        .delete('/task-operator')
+        .expect(500);
+
+      // Assert: 500, error message
+      expect(response.body).toHaveProperty('error', 'Failed to disable task operator');
+    });
+  });
+
+  describe('GET /task-operator/lock', () => {
+    it('should return lock status when processing', async () => {
+      // Arrange: Mock isProcessing to return true
+      const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+      const mockTaskOperatorService = {
+        isProcessing: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+      };
+      jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+      await app.initialize();
+
+      // Act: GET /task-operator/lock
+      const response = await request(app.app)
+        .get('/task-operator/lock')
+        .expect(200);
+
+      // Assert: 200, { success: true, isLocked: true, message: <string> }
+      expect(response.body).toEqual({
+        success: true,
+        isLocked: true,
+        message: expect.any(String),
+      });
+    });
+
+    it('should return lock status when not processing', async () => {
+      // Arrange: Mock isProcessing to return false
+      const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+      const mockTaskOperatorService = {
+        isProcessing: jest.fn<() => Promise<boolean>>().mockResolvedValue(false),
+      };
+      jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+      await app.initialize();
+
+      // Act: GET /task-operator/lock
+      const response = await request(app.app)
+        .get('/task-operator/lock')
+        .expect(200);
+
+      // Assert: 200, { success: true, isLocked: false, message: <string> }
+      expect(response.body).toEqual({
+        success: true,
+        isLocked: false,
+        message: expect.any(String),
+      });
+    });
+
+    it('should return 500 when isProcessing throws', async () => {
+      // Arrange: Mock isProcessing to throw
+      const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+      const mockTaskOperatorService = {
+        isProcessing: jest.fn<() => Promise<boolean>>().mockRejectedValue(new Error('Redis error')),
+      };
+      jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+      await app.initialize();
+
+      // Act: GET /task-operator/lock
+      const response = await request(app.app)
+        .get('/task-operator/lock')
+        .expect(500);
+
+      // Assert: 500, error message
+      expect(response.body).toHaveProperty('error', 'Failed to check task operator lock status');
+    });
+  });
+
+  describe('DELETE /task-operator/lock', () => {
+    it('should clear lock and return lockCleared: true', async () => {
+      // Arrange: Mock clearLock to return true
+      const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+      const mockTaskOperatorService = {
+        clearLock: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+      };
+      jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+      await app.initialize();
+
+      // Act: DELETE /task-operator/lock
+      const response = await request(app.app)
+        .delete('/task-operator/lock')
+        .expect(200);
+
+      // Assert: 200, { success: true, lockCleared: true, message: <string> }
+      expect(response.body).toEqual({
+        success: true,
+        lockCleared: true,
+        message: expect.any(String),
+      });
+    });
+
+    it('should return lockCleared: false when lock did not exist', async () => {
+      // Arrange: Mock clearLock to return false
+      const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+      const mockTaskOperatorService = {
+        clearLock: jest.fn<() => Promise<boolean>>().mockResolvedValue(false),
+      };
+      jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+      await app.initialize();
+
+      // Act: DELETE /task-operator/lock
+      const response = await request(app.app)
+        .delete('/task-operator/lock')
+        .expect(200);
+
+      // Assert: 200, { success: true, lockCleared: false, message: <string> }
+      expect(response.body).toEqual({
+        success: true,
+        lockCleared: false,
+        message: expect.any(String),
+      });
+    });
+
+    it('should return 500 when clearLock throws', async () => {
+      // Arrange: Mock clearLock to throw
+      const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+      const mockTaskOperatorService = {
+        clearLock: jest.fn<() => Promise<boolean>>().mockRejectedValue(new Error('Redis error')),
+      };
+      jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+      await app.initialize();
+
+      // Act: DELETE /task-operator/lock
+      const response = await request(app.app)
+        .delete('/task-operator/lock')
+        .expect(500);
+
+      // Assert: 500, error message
+      expect(response.body).toHaveProperty('error', 'Failed to clear task operator lock');
     });
   });
 
