@@ -311,6 +311,23 @@ describe('MCPServer', () => {
 
   describe('get_agent_status tool', () => {
     it('should return agent status', async () => {
+      // Arrange: Mock getAgentStatus to return complete agent status
+      const mockAgentStatus = {
+        name: 'test-agent',
+        isActive: true,
+        targetUrl: 'http://example.com/api',
+        method: 'POST' as const,
+        headers: { 'Content-Type': 'application/json' },
+        body: { key: 'value' },
+        schedule: '0 */5 * * * *',
+        timeout: 30000,
+        queue: 'default',
+        lastRun: new Date('2024-01-01T00:00:00Z'),
+        nextRun: new Date('2024-01-01T00:05:00Z'),
+        jobId: 'job-123',
+      };
+      mockQueueManager.getAgentStatus.mockResolvedValueOnce(mockAgentStatus);
+
       const handleGetAgentStatus = (
         mcpServer as unknown as {
           handleGetAgentStatus: (args: { name: string }) => Promise<unknown>;
@@ -321,6 +338,54 @@ describe('MCPServer', () => {
 
       expect(mockQueueManager.getAgentStatus).toHaveBeenCalledWith('test-agent');
       expect(result).toHaveProperty('content');
+      
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+      expect(resultAny.content).toBeDefined();
+      expect(resultAny.content.length).toBeGreaterThan(0);
+      expect(resultAny.content[0]).toHaveProperty('type', 'text');
+      expect(resultAny.content[0]).toHaveProperty('text');
+      expect(resultAny.isError).toBeUndefined(); // Should not be an error
+      
+      // Parse and assert JSON structure
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow(); // Verify it's valid JSON
+      
+      const content = JSON.parse(jsonText);
+      
+      // Assert all AgentStatus fields (from PromptStatus)
+      expect(content).toHaveProperty('name', 'test-agent');
+      expect(content).toHaveProperty('isActive', true);
+      expect(typeof content.name).toBe('string');
+      expect(typeof content.isActive).toBe('boolean');
+      
+      // Assert optional PromptStatus fields
+      if (content.lastRun) {
+        expect(typeof content.lastRun).toBe('string'); // Date is serialized as string
+      }
+      if (content.nextRun) {
+        expect(typeof content.nextRun).toBe('string');
+      }
+      if (content.jobId) {
+        expect(typeof content.jobId).toBe('string');
+      }
+      
+      // Assert AgentStatus-specific fields
+      expect(content).toHaveProperty('targetUrl', 'http://example.com/api');
+      expect(content).toHaveProperty('method', 'POST');
+      expect(content).toHaveProperty('headers');
+      expect(typeof content.headers).toBe('object');
+      expect(content).toHaveProperty('body');
+      expect(content).toHaveProperty('schedule', '0 */5 * * * *');
+      expect(content).toHaveProperty('timeout', 30000);
+      expect(content).toHaveProperty('queue', 'default');
+      
+      // Assert types
+      expect(typeof content.targetUrl).toBe('string');
+      expect(typeof content.method).toBe('string');
+      expect(typeof content.schedule).toBe('string');
+      expect(typeof content.timeout).toBe('number');
+      expect(typeof content.queue).toBe('string');
     });
 
     it('should return error if agent not found', async () => {
@@ -333,6 +398,19 @@ describe('MCPServer', () => {
       ).handleGetAgentStatus.bind(mcpServer);
 
       const result = await handleGetAgentStatus({ name: 'non-existent' });
+      
+      // Assert JSON structure for error case
+      const resultAny = result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+      expect(resultAny.isError).toBe(true); // Should be marked as error
+      
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow(); // Verify it's valid JSON
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('error');
+      expect(typeof content.error).toBe('string');
+      expect(content.error).toContain('non-existent');
+      expect(content.error).toContain('not found');
 
       expect(result).toHaveProperty('isError', true);
     });
