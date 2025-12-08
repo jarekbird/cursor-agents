@@ -426,6 +426,159 @@ describe('DatabaseService', () => {
       // Cleanup
       service.close();
     });
+
+    it('should update status and updatedat when column already exists', () => {
+      // Arrange: Table already has updatedat column (created in beforeEach)
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`INSERT INTO tasks (id, prompt, "order", uuid, status) VALUES (1, 'Test prompt', 0, 'test-uuid', 0)`);
+      const initialTime = new Date().toISOString();
+      setupDb.prepare(`UPDATE tasks SET updatedat = ? WHERE id = 1`).run(initialTime);
+      setupDb.close();
+      
+      // Act: Update task status
+      const result = dbService.updateTaskStatus(1, 4);
+      
+      // Assert: Returns true on success
+      expect(result).toBe(true);
+      
+      // Assert: Status was updated
+      const checkDb = new Database(testDbPath);
+      const task = checkDb.prepare('SELECT status, updatedat FROM tasks WHERE id = ?').get(1) as { status: number; updatedat: string } | undefined;
+      expect(task?.status).toBe(4);
+      // Verify updatedat was updated (should be newer than initial time)
+      if (task?.updatedat) {
+        expect(new Date(task.updatedat).getTime()).toBeGreaterThanOrEqual(new Date(initialTime).getTime());
+      }
+      checkDb.close();
+    });
+
+    it('should log warning when old complete column exists', () => {
+      // Arrange: Create table with complete column
+      dbService.close();
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`DROP TABLE IF EXISTS tasks`);
+      setupDb.exec(`
+        CREATE TABLE tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          prompt TEXT NOT NULL,
+          "order" INTEGER NOT NULL DEFAULT 0,
+          uuid TEXT NOT NULL,
+          status INTEGER NOT NULL DEFAULT 0,
+          updatedat DATETIME DEFAULT CURRENT_TIMESTAMP,
+          complete INTEGER
+        )
+      `);
+      setupDb.exec(`INSERT INTO tasks (id, prompt, "order", uuid, status) VALUES (1, 'Test prompt', 0, 'test-uuid', 0)`);
+      setupDb.close();
+      
+      const service = new DatabaseService(testDbPath);
+      
+      // Mock logger.warn to verify it's called
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {
+        return logger;
+      });
+      
+      // Act: Update task status
+      const result = service.updateTaskStatus(1, 4);
+      
+      // Assert: Returns true on success
+      expect(result).toBe(true);
+      
+      // Assert: Status was updated
+      const checkDb = new Database(testDbPath);
+      const task = checkDb.prepare('SELECT status FROM tasks WHERE id = ?').get(1) as { status: number } | undefined;
+      expect(task?.status).toBe(4);
+      checkDb.close();
+      
+      // Assert: Warning was logged about complete column
+      expect(warnSpy).toHaveBeenCalled();
+      const warnCall = warnSpy.mock.calls.find(call => {
+        const firstArg = call[0] as unknown;
+        return typeof firstArg === 'string' && firstArg.includes('complete column');
+      });
+      expect(warnCall).toBeDefined();
+      
+      // Cleanup
+      warnSpy.mockRestore();
+      service.close();
+    });
+  });
+
+  describe('getTaskStatus', () => {
+    it('should return task status for existing task', () => {
+      // Arrange: Insert task with status 0
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`INSERT INTO tasks (id, prompt, "order", uuid, status) VALUES (1, 'Test prompt', 0, 'test-uuid', 0)`);
+      setupDb.close();
+      
+      // Act
+      const result = dbService.getTaskStatus(1);
+      
+      // Assert
+      expect(result).toBe(0);
+    });
+
+    it('should return null for non-existent task', () => {
+      // Arrange: No task with ID 999
+      
+      // Act
+      const result = dbService.getTaskStatus(999);
+      
+      // Assert
+      expect(result).toBeNull();
+    });
+
+    it('should return null and log error when query fails', () => {
+      // Arrange: Drop the table to cause query to fail
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`DROP TABLE IF EXISTS tasks`);
+      setupDb.close();
+      
+      // Mock logger.error to verify it's called
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => {
+        return logger;
+      });
+      
+      // Act
+      const result = dbService.getTaskStatus(1);
+      
+      // Assert: Returns null (fail-safe behavior)
+      expect(result).toBeNull();
+      
+      // Assert: Error was logged
+      expect(errorSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('markTaskComplete', () => {
+    it('should mark task as complete', () => {
+      // Arrange: Insert task with status 0
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`INSERT INTO tasks (id, prompt, "order", uuid, status) VALUES (1, 'Test prompt', 0, 'test-uuid', 0)`);
+      setupDb.close();
+      
+      // Act
+      const result = dbService.markTaskComplete(1);
+      
+      // Assert: Returns true on success
+      expect(result).toBe(true);
+      
+      // Assert: Status is now 1 (complete)
+      expect(dbService.getTaskStatus(1)).toBe(1);
+    });
+
+    it('should return false when task does not exist', () => {
+      // Arrange: No task with ID 999
+      
+      // Act
+      const result = dbService.markTaskComplete(999);
+      
+      // Assert: Returns false (updateTaskStatus returns false for non-existent task)
+      expect(result).toBe(false);
+    });
   });
 });
 
