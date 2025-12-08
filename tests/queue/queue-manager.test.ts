@@ -11,6 +11,9 @@ const mockQueueInstance = {
   removeRepeatableByKey: jest.fn(),
   getRepeatableJobs: jest.fn(),
   getCompleted: jest.fn(),
+  getWaiting: jest.fn(),
+  getActive: jest.fn(),
+  getDelayed: jest.fn(),
   close: jest.fn(),
 };
 
@@ -54,6 +57,9 @@ describe('QueueManager', () => {
     (mockQueueInstance.removeRepeatableByKey as jest.Mock<() => Promise<void>>).mockResolvedValue(undefined);
     (mockQueueInstance.getRepeatableJobs as jest.Mock<() => Promise<unknown[]>>).mockResolvedValue([]);
     (mockQueueInstance.getCompleted as jest.Mock<() => Promise<unknown[]>>).mockResolvedValue([]);
+    (mockQueueInstance.getWaiting as jest.Mock<() => Promise<unknown[]>>).mockResolvedValue([]);
+    (mockQueueInstance.getActive as jest.Mock<() => Promise<unknown[]>>).mockResolvedValue([]);
+    (mockQueueInstance.getDelayed as jest.Mock<() => Promise<unknown[]>>).mockResolvedValue([]);
     (mockQueueInstance.close as jest.Mock<() => Promise<void>>).mockResolvedValue(undefined);
     (mockWorkerInstance.close as jest.Mock<() => Promise<void>>).mockResolvedValue(undefined);
     (mockQueueEventsInstance.close as jest.Mock<() => Promise<void>>).mockResolvedValue(undefined);
@@ -393,6 +399,75 @@ describe('QueueManager', () => {
 
       expect(queues).toHaveLength(1);
       expect(queues[0]).toBe(mockQueueInstance);
+    });
+  });
+
+  describe('hasExistingJobs', () => {
+    it('should return true when matching jobs exist and excludeActive is false', async () => {
+      // Arrange: Create a queue and add it to queueManager
+      const queueName = 'test-queue';
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock queue methods to return matching jobs
+      (queue.getWaiting as any).mockResolvedValue([
+        { id: '1', name: 'agent:test', data: {} },
+      ]);
+      (queue.getActive as any).mockResolvedValue([]);
+      (queue.getDelayed as any).mockResolvedValue([]);
+      
+      // Act
+      const result = await queueManager.hasExistingJobs('agent:test', queueName, false);
+      
+      // Assert
+      expect(result).toBe(true);
+      expect(queue.getWaiting).toHaveBeenCalled();
+      expect(queue.getActive).toHaveBeenCalled();
+      expect(queue.getDelayed).toHaveBeenCalled();
+    });
+
+    it('should return false when only active jobs match and excludeActive is true', async () => {
+      // Arrange: Create a queue and add it to queueManager
+      const queueName = 'test-queue-2';
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock queue methods - only active jobs match
+      (queue.getWaiting as any).mockResolvedValue([]);
+      (queue.getActive as any).mockResolvedValue([
+        { id: '1', name: 'agent:test', data: {} },
+      ]);
+      (queue.getDelayed as any).mockResolvedValue([]);
+      
+      // Act
+      const result = await queueManager.hasExistingJobs('agent:test', queueName, true);
+      
+      // Assert
+      expect(result).toBe(false);
+      expect(queue.getWaiting).toHaveBeenCalled();
+      expect(queue.getActive).toHaveBeenCalled();
+      expect(queue.getDelayed).toHaveBeenCalled();
+    });
+
+    it('should return false and log error when BullMQ methods throw', async () => {
+      // Arrange: Create a queue and add it to queueManager
+      const queueName = 'test-queue-3';
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock queue methods to throw
+      (queue.getWaiting as any).mockRejectedValue(new Error('Redis error'));
+      (queue.getActive as any).mockResolvedValue([]);
+      (queue.getDelayed as any).mockResolvedValue([]);
+      
+      const loggerErrorSpy = jest.spyOn(logger, 'error');
+      
+      // Act
+      const result = await queueManager.hasExistingJobs('agent:test', queueName, false);
+      
+      // Assert
+      expect(result).toBe(false);
+      expect(loggerErrorSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      loggerErrorSpy.mockRestore();
     });
   });
 
