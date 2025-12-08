@@ -396,6 +396,91 @@ describe('QueueManager', () => {
     });
   });
 
+  describe('getOrCreateQueue', () => {
+    it('should create new queue with correct concurrency settings', async () => {
+      // Arrange: Queue name that doesn't exist
+      const queueName = 'new-queue';
+      const defaultConcurrency = parseInt(process.env.BULLMQ_CONCURRENCY || '5', 10);
+      
+      // Clear any existing mocks
+      jest.clearAllMocks();
+      
+      // Act: Call getOrCreateQueue (private method, access via any)
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Assert: Queue factory called with correct name
+      expect(mockQueueFactory).toHaveBeenCalledWith(queueName, expect.objectContaining({
+        connection: mockRedisInstance,
+      }));
+      
+      // Assert: Worker factory called with default concurrency
+      expect(mockWorkerFactory).toHaveBeenCalledWith(
+        queueName,
+        expect.any(Function),
+        expect.objectContaining({
+          connection: mockRedisInstance,
+          concurrency: defaultConcurrency,
+        })
+      );
+      
+      // Assert: Queue events factory called
+      expect(mockQueueEventsFactory).toHaveBeenCalledWith(queueName, expect.objectContaining({
+        connection: mockRedisInstance,
+      }));
+      
+      // Assert: Queue added to internal map and returned
+      expect(queue).toBe(mockQueueInstance);
+      expect(queueManager.getQueues()).toContain(queue);
+    });
+
+    it('should create task-operator queue with concurrency 1', async () => {
+      // Arrange: task-operator queue name
+      const queueName = 'task-operator';
+      
+      // Clear any existing mocks
+      jest.clearAllMocks();
+      
+      // Act: Call getOrCreateQueue
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Assert: Worker factory called with concurrency 1
+      expect(mockWorkerFactory).toHaveBeenCalledWith(
+        queueName,
+        expect.any(Function),
+        expect.objectContaining({
+          connection: mockRedisInstance,
+          concurrency: 1,
+        })
+      );
+      
+      // Assert: Other factories called correctly
+      expect(mockQueueFactory).toHaveBeenCalled();
+      expect(mockQueueEventsFactory).toHaveBeenCalled();
+      expect(queue).toBe(mockQueueInstance);
+    });
+
+    it('should return existing queue without creating duplicates', async () => {
+      // Arrange: Create queue first
+      const queueName = 'existing-queue';
+      const firstQueue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Clear factory spies to track second call
+      jest.clearAllMocks();
+      
+      // Act: Call getOrCreateQueue again
+      const secondQueue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Assert: Same queue instance returned
+      expect(secondQueue).toBe(firstQueue);
+      expect(secondQueue).toBe(mockQueueInstance);
+      
+      // Assert: Factories not called again (no duplicates)
+      expect(mockQueueFactory).not.toHaveBeenCalled();
+      expect(mockWorkerFactory).not.toHaveBeenCalled();
+      expect(mockQueueEventsFactory).not.toHaveBeenCalled();
+    });
+  });
+
   describe('shutdown', () => {
     it('should shutdown gracefully', async () => {
       const options: RecurringPromptOptions = {
