@@ -286,5 +286,91 @@ describe('DatabaseService', () => {
       errorSpy.mockRestore();
     });
   });
+
+  describe('getNextReadyTask', () => {
+    it('should return null when no tasks are available', () => {
+      // Arrange: Empty tasks table (already created in beforeEach)
+      
+      // Act
+      const result = dbService.getNextReadyTask();
+      
+      // Assert
+      expect(result).toBeNull();
+    });
+
+    it('should only consider tasks with status IN (0, 4)', () => {
+      // Arrange: Insert tasks with various statuses
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`
+        INSERT INTO tasks (id, prompt, "order", uuid, status) VALUES
+        (1, 'task1', 1, 'uuid1', 0),
+        (2, 'task2', 2, 'uuid2', 4),
+        (3, 'task3', 0, 'uuid3', 1),
+        (4, 'task4', 0, 'uuid4', 2),
+        (5, 'task5', 0, 'uuid5', 3)
+      `);
+      setupDb.close();
+      
+      // Act
+      const result = dbService.getNextReadyTask();
+      
+      // Assert: Should return a task with status 0 or 4
+      expect(result).not.toBeNull();
+      expect([0, 4]).toContain(result?.status);
+      // Verify returned task is not status 1, 2, or 3
+      expect(result?.status).not.toBe(1);
+      expect(result?.status).not.toBe(2);
+      expect(result?.status).not.toBe(3);
+    });
+
+    it('should return task with lowest order then id', () => {
+      // Arrange: Insert tasks with varying order and status
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`
+        INSERT INTO tasks (id, prompt, "order", uuid, status) VALUES
+        (1, 'task1', 10, 'uuid1', 0),
+        (2, 'task2', 5, 'uuid2', 0),
+        (3, 'task3', 5, 'uuid3', 4),
+        (4, 'task4', 5, 'uuid4', 0)
+      `);
+      setupDb.close();
+      
+      // Act
+      const result = dbService.getNextReadyTask();
+      
+      // Assert: Should return task with lowest order (5), then lowest id (2)
+      expect(result).not.toBeNull();
+      expect(result?.order).toBe(5); // Lowest order
+      expect(result?.id).toBe(2); // Lowest id among tasks with order=5
+    });
+
+    it('should return null and log error when query fails', () => {
+      // Arrange: Drop the table to cause query to fail
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`DROP TABLE IF EXISTS tasks`);
+      setupDb.close();
+      
+      // Mock logger.error to verify it's called
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => {
+        return logger;
+      });
+      
+      // Act
+      const result = dbService.getNextReadyTask();
+      
+      // Assert: Returns null (fail-safe behavior)
+      expect(result).toBeNull();
+      
+      // Assert: Error was logged
+      expect(errorSpy).toHaveBeenCalled();
+      const errorCall = errorSpy.mock.calls[0];
+      expect(errorCall.length).toBeGreaterThan(0);
+      const firstArg = errorCall[0];
+      expect(firstArg).toBeDefined();
+      
+      // Cleanup
+      errorSpy.mockRestore();
+    });
+  });
 });
 
