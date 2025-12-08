@@ -34,8 +34,9 @@ services:
       - "traefik.enable=true"
       # Path-based routing - accessible at /agents/* on the same domain
       # Priority ensures this router is evaluated before the general Rails app router
+      # Only create HTTPS router when DOMAIN_NAME is set and contains a dot (real domain, not localhost)
       - "traefik.http.routers.cursor-agents.priority=10"
-      - "traefik.http.routers.cursor-agents.rule=Host(`${DOMAIN_NAME:-localhost}`) && PathPrefix(`/agents`)"
+      - "traefik.http.routers.cursor-agents.rule=HostRegexp(`.*\\..*`) && Host(`${DOMAIN_NAME:-localhost}`) && PathPrefix(`/agents`)"
       - "traefik.http.routers.cursor-agents.entrypoints=websecure"
       - "traefik.http.routers.cursor-agents.tls.certresolver=letsencrypt"
       - "traefik.http.services.cursor-agents.loadbalancer.server.port=3002"
