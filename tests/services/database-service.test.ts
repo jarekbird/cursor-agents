@@ -193,5 +193,70 @@ describe('DatabaseService', () => {
       errorSpy.mockRestore();
     });
   });
+
+  describe('setSystemSetting', () => {
+    it('should set system setting to true', () => {
+      // Arrange: Clean table (already created in beforeEach)
+      
+      // Act
+      const result = dbService.setSystemSetting('test_setting', true);
+      
+      // Assert: Returns true on success
+      expect(result).toBe(true);
+      
+      // Assert: Can read back as enabled
+      expect(dbService.isSystemSettingEnabled('test_setting')).toBe(true);
+      
+      // Assert: Database has value 1
+      const checkDb = new Database(testDbPath);
+      const row = checkDb.prepare('SELECT value FROM system_settings WHERE name = ?').get('test_setting') as { value: number } | undefined;
+      checkDb.close();
+      expect(row?.value).toBe(1);
+    });
+
+    it('should set system setting to false', () => {
+      // Arrange: Setting exists with value 1
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`INSERT INTO system_settings (name, value) VALUES ('test_setting', 1)`);
+      setupDb.close();
+      
+      // Act
+      const result = dbService.setSystemSetting('test_setting', false);
+      
+      // Assert: Returns true on success
+      expect(result).toBe(true);
+      
+      // Assert: Can read back as disabled
+      expect(dbService.isSystemSettingEnabled('test_setting')).toBe(false);
+      
+      // Assert: Database has value 0
+      const checkDb = new Database(testDbPath);
+      const row = checkDb.prepare('SELECT value FROM system_settings WHERE name = ?').get('test_setting') as { value: number } | undefined;
+      checkDb.close();
+      expect(row?.value).toBe(0);
+    });
+
+    it('should update existing system setting', () => {
+      // Arrange: Setting exists with value 0
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`INSERT INTO system_settings (name, value) VALUES ('test_setting', 0)`);
+      setupDb.close();
+      
+      // Act: Update to true
+      const result = dbService.setSystemSetting('test_setting', true);
+      
+      // Assert: Returns true on success
+      expect(result).toBe(true);
+      
+      // Assert: Setting now has value 1
+      expect(dbService.isSystemSettingEnabled('test_setting')).toBe(true);
+      
+      // Assert: Database has value 1
+      const checkDb = new Database(testDbPath);
+      const row = checkDb.prepare('SELECT value FROM system_settings WHERE name = ?').get('test_setting') as { value: number } | undefined;
+      checkDb.close();
+      expect(row?.value).toBe(1);
+    });
+  });
 });
 
