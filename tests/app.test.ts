@@ -1009,6 +1009,37 @@ describe('CursorAgentsApp', () => {
         });
         expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id-error', callbackBody);
       });
+
+      it('should return 200 with error when handleCallback throws', async () => {
+        // Arrange: Mock handleCallback to throw error
+        const { TaskOperatorService } = await import('../src/services/task-operator-service.js');
+        const mockTaskOperatorService = {
+          handleCallback: jest.fn<() => Promise<void>>().mockRejectedValue(new Error('Database error')),
+        };
+        jest.spyOn(TaskOperatorService, 'getInstance').mockReturnValue(mockTaskOperatorService as any);
+
+        await app.initialize();
+
+        // Act: POST /task-operator/callback with valid secret and requestId
+        const callbackBody = {
+          requestId: 'test-request-id-error-handling',
+          success: true,
+        };
+
+        const response = await request(app.app)
+          .post('/task-operator/callback')
+          .set('x-webhook-secret', 'test-secret')
+          .send(callbackBody)
+          .expect(200);
+
+        // Assert: 200, { received: true, error: 'Internal error processing callback' }
+        // Note: Returns 200 (not 500) to prevent cursor-runner from retrying
+        expect(response.body).toEqual({
+          received: true,
+          error: 'Internal error processing callback',
+        });
+        expect(mockTaskOperatorService.handleCallback).toHaveBeenCalledWith('test-request-id-error-handling', callbackBody);
+      });
     });
   });
 
