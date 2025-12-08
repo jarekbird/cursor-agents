@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { PromptProcessor } from '../../src/queue/prompt-processor.js';
 import type { AgentJobData, PromptJobData } from '../../src/queue/prompt-processor.js';
+import { QueueManager } from '../../src/queue/queue-manager.js';
 
 describe('PromptProcessor', () => {
   let processor: PromptProcessor;
   let mockFetch: jest.MockedFunction<typeof fetch>;
+  let mockQueueManager: jest.Mocked<QueueManager>;
 
   beforeEach(() => {
-    processor = new PromptProcessor();
+    mockQueueManager = {
+      addDelayedAgent: jest.fn<() => Promise<{ id: string; name: string } | null>>().mockResolvedValue({ id: 'job-1', name: 'test-agent' }),
+    } as unknown as jest.Mocked<QueueManager>;
+    processor = new PromptProcessor(mockQueueManager);
     mockFetch = jest.fn() as jest.MockedFunction<typeof fetch>;
     global.fetch = mockFetch;
     process.env.CURSOR_RUNNER_URL = 'http://cursor-runner:3001';
