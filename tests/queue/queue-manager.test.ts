@@ -14,6 +14,9 @@ const mockQueueInstance = {
   getWaiting: jest.fn(),
   getActive: jest.fn(),
   getDelayed: jest.fn(),
+  getWaitingCount: jest.fn(),
+  getActiveCount: jest.fn(),
+  getDelayedCount: jest.fn(),
   close: jest.fn(),
 };
 
@@ -60,6 +63,9 @@ describe('QueueManager', () => {
     (mockQueueInstance.getWaiting as jest.Mock<() => Promise<unknown[]>>).mockResolvedValue([]);
     (mockQueueInstance.getActive as jest.Mock<() => Promise<unknown[]>>).mockResolvedValue([]);
     (mockQueueInstance.getDelayed as jest.Mock<() => Promise<unknown[]>>).mockResolvedValue([]);
+    (mockQueueInstance.getWaitingCount as jest.Mock<() => Promise<number>>).mockResolvedValue(0);
+    (mockQueueInstance.getActiveCount as jest.Mock<() => Promise<number>>).mockResolvedValue(0);
+    (mockQueueInstance.getDelayedCount as jest.Mock<() => Promise<number>>).mockResolvedValue(0);
     (mockQueueInstance.close as jest.Mock<() => Promise<void>>).mockResolvedValue(undefined);
     (mockWorkerInstance.close as jest.Mock<() => Promise<void>>).mockResolvedValue(undefined);
     (mockQueueEventsInstance.close as jest.Mock<() => Promise<void>>).mockResolvedValue(undefined);
@@ -682,6 +688,158 @@ describe('QueueManager', () => {
       expect(result).not.toBeNull();
       expect(result?.name).toBe('test-agent-data');
     });
+  });
+
+  describe('removeAgent', () => {
+    it('should remove repeatable and waiting/delayed jobs for agent', async () => {
+      // Arrange: Create queue and add agent
+      await queueManager.initialize();
+      const agentConfig = {
+        name: 'test-agent-remove',
+        targetUrl: 'http://example.com',
+        schedule: '0 */5 * * * *',
+        queue: 'default',
+      };
+      
+      await queueManager.addRecurringAgent(agentConfig);
+      
+      // Mock queue methods
+      const queue = (queueManager as any).getOrCreateQueue('default');
+      const mockJob = {
+        id: 'job-1',
+        name: 'test-agent-remove',
+        remove: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      };
+      (queue.getRepeatableJobs as any).mockResolvedValue([
+        { id: 'agent:test-agent-remove', key: 'agent:test-agent-remove' },
+      ]);
+      (queue.getWaiting as any).mockResolvedValue([mockJob]);
+      (queue.getDelayed as any).mockResolvedValue([]);
+      
+      // Mock checkAndCleanupEmptyQueue
+      const checkAndCleanupSpy = jest.spyOn(queueManager as any, 'checkAndCleanupEmptyQueue').mockResolvedValue(undefined);
+      
+      // Act
+      await queueManager.removeAgent('test-agent-remove');
+      
+      // Assert
+      expect(queue.removeRepeatableByKey).toHaveBeenCalledWith('agent:test-agent-remove');
+      expect(mockJob.remove).toHaveBeenCalled();
+      expect(checkAndCleanupSpy).toHaveBeenCalledWith('default');
+      
+      // Cleanup
+      checkAndCleanupSpy.mockRestore();
+    });
+
+    it('should log error and return false when removeRepeatableByKey throws', async () => {
+      // Arrange: Create queue and add agent
+      await queueManager.initialize();
+      const agentConfig = {
+        name: 'test-agent-error',
+        targetUrl: 'http://example.com',
+        schedule: '0 */5 * * * *',
+      };
+      
+      await queueManager.addRecurringAgent(agentConfig);
+      
+      // Mock queue methods - make removeRepeatableByKey throw
+      const queue = (queueManager as any).getOrCreateQueue('default');
+      (queue.getRepeatableJobs as any).mockResolvedValue([
+        { id: 'agent:test-agent-error', key: 'agent:test-agent-error' },
+      ]);
+      (queue.getWaiting as any).mockResolvedValue([]);
+      (queue.getDelayed as any).mockResolvedValue([]);
+      (queue.removeRepeatableByKey as any).mockRejectedValue(new Error('Remove failed'));
+      
+      const loggerWarnSpy = jest.spyOn(logger, 'warn');
+      const checkAndCleanupSpy = jest.spyOn(queueManager as any, 'checkAndCleanupEmptyQueue').mockResolvedValue(undefined);
+      
+      // Act
+      await queueManager.removeAgent('test-agent-error');
+      
+      // Assert: Error logged but process continues
+      expect(loggerWarnSpy).toHaveBeenCalled();
+      expect(checkAndCleanupSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      loggerWarnSpy.mockRestore();
+      checkAndCleanupSpy.mockRestore();
+    });
+  });
+
+  describe('checkAndCleanupEmptyQueue', () => {
+    it('should delete queue when it is empty', async () => {
+      // Arrange: Non-default empty queue
+      const queueName = 'empty-queue';
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock queue to be empty
+      (queue.getWaitingCount as any).mockResolvedValue(0);
+      (queue.getActiveCount as any).mockResolvedValue(0);
+      (queue.getDelayedCount as any).mockResolvedValue(0);
+      (queue.getRepeatableJobs as any).mockResolvedValue([]);
+      
+      // Mock deleteQueue
+      const deleteQueueSpy = jest.spyOn(queueManager, 'deleteQueue').mockResolvedValue(undefined);
+      
+      // Act
+      await (queueManager as any).checkAndCleanupEmptyQueue(queueName);
+      
+      // Assert
+      expect(deleteQueueSpy).toHaveBeenCalledWith(queueName);
+      
+      // Cleanup
+      deleteQueueSpy.mockRestore();
+    });
+
+    it('should not delete queue when it is not empty', async () => {
+      // Arrange: Queue with jobs
+      const queueName = 'non-empty-queue';
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock queue to have jobs
+      (queue.getWaitingCount as any).mockResolvedValue(1);
+      (queue.getActiveCount as any).mockResolvedValue(0);
+      (queue.getDelayedCount as any).mockResolvedValue(0);
+      (queue.getRepeatableJobs as any).mockResolvedValue([]);
+      
+      // Mock deleteQueue
+      const deleteQueueSpy = jest.spyOn(queueManager, 'deleteQueue').mockResolvedValue(undefined);
+      
+      // Act
+      await (queueManager as any).checkAndCleanupEmptyQueue(queueName);
+      
+      // Assert
+      expect(deleteQueueSpy).not.toHaveBeenCalled();
+      
+      // Cleanup
+      deleteQueueSpy.mockRestore();
+    });
+
+    it('should not delete default queue even when empty', async () => {
+      // Arrange: Default queue (empty)
+      const queueName = 'default';
+      const queue = (queueManager as any).getOrCreateQueue(queueName);
+      
+      // Mock queue to be empty
+      (queue.getWaitingCount as any).mockResolvedValue(0);
+      (queue.getActiveCount as any).mockResolvedValue(0);
+      (queue.getDelayedCount as any).mockResolvedValue(0);
+      (queue.getRepeatableJobs as any).mockResolvedValue([]);
+      
+      // Mock deleteQueue
+      const deleteQueueSpy = jest.spyOn(queueManager, 'deleteQueue').mockResolvedValue(undefined);
+      
+      // Act
+      await (queueManager as any).checkAndCleanupEmptyQueue(queueName);
+      
+      // Assert: Default queue should not be deleted
+      expect(deleteQueueSpy).not.toHaveBeenCalled();
+      
+      // Cleanup
+      deleteQueueSpy.mockRestore();
+    });
+
   });
 
   describe('findAgentQueue', () => {
