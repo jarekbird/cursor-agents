@@ -555,6 +555,12 @@ describe('CursorAgentsApp', () => {
       // Assert: 500, error message
       expect(response.body).toHaveProperty('error', 'Failed to disable task operator');
     });
+
+    // Note: The catch block at lines 382-384 is defensive programming.
+    // In practice, removeAgent errors are caught internally (lines 365-370),
+    // and setSystemSetting is synchronous and doesn't throw.
+    // This catch block would only trigger on unexpected errors, which are hard to test.
+    // The error handling is still valuable defensive code.
   });
 
   describe('GET /task-operator/lock', () => {
@@ -1263,6 +1269,60 @@ describe('CursorAgentsApp', () => {
       await app.shutdown();
 
       expect(mockQueueManager.shutdown).toHaveBeenCalled();
+    });
+  });
+
+  describe('initialize - auto-start task operator', () => {
+    it('should auto-start task operator when enabled', async () => {
+      // Arrange: Task operator is enabled
+      mockDatabaseService.isSystemSettingEnabled.mockReturnValueOnce(true);
+      mockQueueManager.addOneTimeAgent.mockResolvedValueOnce({
+        id: 'task-operator-job-123',
+        name: 'task-operator',
+      });
+
+      // Act: Initialize app
+      await app.initialize();
+
+      // Assert: addOneTimeAgent was called with task-operator config (covers lines 526-550)
+      expect(mockDatabaseService.isSystemSettingEnabled).toHaveBeenCalledWith('task_operator');
+      expect(mockQueueManager.addOneTimeAgent).toHaveBeenCalledWith({
+        name: 'task-operator',
+        targetUrl: 'task-operator://internal',
+        method: 'POST',
+        body: {
+          type: 'task_operator',
+          agentName: 'task-operator',
+          queue: 'task-operator',
+        },
+        queue: 'task-operator',
+        timeout: 30000,
+      });
+    });
+
+    it('should handle auto-start task operator failure gracefully', async () => {
+      // Arrange: Task operator is enabled but addOneTimeAgent fails
+      mockDatabaseService.isSystemSettingEnabled.mockReturnValueOnce(true);
+      mockQueueManager.addOneTimeAgent.mockRejectedValueOnce(new Error('Failed to start task operator'));
+
+      // Act: Initialize app (should not throw)
+      await expect(app.initialize()).resolves.not.toThrow();
+
+      // Assert: addOneTimeAgent was called but error was caught (covers line 549-550)
+      expect(mockDatabaseService.isSystemSettingEnabled).toHaveBeenCalledWith('task_operator');
+      expect(mockQueueManager.addOneTimeAgent).toHaveBeenCalled();
+    });
+
+    it('should not auto-start task operator when disabled', async () => {
+      // Arrange: Task operator is disabled
+      mockDatabaseService.isSystemSettingEnabled.mockReturnValueOnce(false);
+
+      // Act: Initialize app
+      await app.initialize();
+
+      // Assert: addOneTimeAgent was not called
+      expect(mockDatabaseService.isSystemSettingEnabled).toHaveBeenCalledWith('task_operator');
+      expect(mockQueueManager.addOneTimeAgent).not.toHaveBeenCalled();
     });
   });
 });
