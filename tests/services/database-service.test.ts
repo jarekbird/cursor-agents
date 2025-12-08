@@ -257,6 +257,34 @@ describe('DatabaseService', () => {
       checkDb.close();
       expect(row?.value).toBe(1);
     });
+
+    it('should return false and log error when database write fails', () => {
+      // Arrange: Drop the table to cause write to fail
+      const setupDb = new Database(testDbPath);
+      setupDb.exec(`DROP TABLE IF EXISTS system_settings`);
+      setupDb.close();
+      
+      // Mock logger.error to verify it's called
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => {
+        return logger;
+      });
+      
+      // Act
+      const result = dbService.setSystemSetting('test_setting', true);
+      
+      // Assert: Returns false (fail-closed behavior)
+      expect(result).toBe(false);
+      
+      // Assert: Error was logged
+      expect(errorSpy).toHaveBeenCalled();
+      const errorCall = errorSpy.mock.calls[0];
+      expect(errorCall.length).toBeGreaterThan(0);
+      const firstArg = errorCall[0];
+      expect(firstArg).toBeDefined();
+      
+      // Cleanup
+      errorSpy.mockRestore();
+    });
   });
 });
 
