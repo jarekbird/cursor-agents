@@ -17,12 +17,13 @@ import { unlinkSync } from 'fs';
 
 describe('TaskOperatorService', () => {
   let mockRedis: {
-    set: jest.Mock<() => Promise<string>>;
+    set: jest.Mock<() => Promise<string | null>>;
     get: jest.Mock<() => Promise<string | null>>;
     del: jest.Mock<() => Promise<number>>;
     exists: jest.Mock<() => Promise<number>>;
     ping: jest.Mock<() => Promise<string>>;
     quit: jest.Mock<() => Promise<string>>;
+    ttl?: jest.Mock<() => Promise<number>>;
   };
   let testDbPath: string;
 
@@ -35,12 +36,13 @@ describe('TaskOperatorService', () => {
 
     // Setup mock Redis
     mockRedis = {
-      set: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
+      set: jest.fn<() => Promise<string | null>>().mockResolvedValue('OK'),
       get: jest.fn<() => Promise<string | null>>().mockResolvedValue(null),
       del: jest.fn<() => Promise<number>>().mockResolvedValue(1),
       exists: jest.fn<() => Promise<number>>().mockResolvedValue(0),
       ping: jest.fn<() => Promise<string>>().mockResolvedValue('PONG'),
       quit: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
+      ttl: jest.fn<() => Promise<number>>().mockResolvedValue(3600),
     };
 
     // Create test database path
@@ -118,6 +120,59 @@ describe('TaskOperatorService', () => {
       
       // Cleanup
       spy.mockRestore();
+    });
+  });
+
+  describe('processNextTask', () => {
+    it('should return lock_held when lock acquisition fails', async () => {
+      // Arrange: Mock Redis set to return null (lock held by another process)
+      mockRedis.set = jest.fn<() => Promise<string | null>>().mockResolvedValue(null);
+      mockRedis.get = jest.fn<() => Promise<string | null>>().mockResolvedValue('other-pid-12345');
+      mockRedis.ttl = jest.fn<() => Promise<number>>().mockResolvedValue(3600);
+      
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      
+      // Mock logger to verify it's called
+      const logger = await import('../../src/logger.js');
+      const infoSpy = jest.spyOn(logger.logger, 'info').mockImplementation(() => logger.logger);
+      
+      // Act
+      const result = await service.processNextTask();
+      
+      // Assert: Returns lock_held
+      expect(result).toEqual({ processed: false, reason: 'lock_held' });
+      expect(mockRedis.set).toHaveBeenCalled();
+      expect(infoSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      infoSpy.mockRestore();
+    });
+
+    it('should return no_tasks when no tasks are available', async () => {
+      // Arrange: Mock Redis lock success, DatabaseService returns null
+      mockRedis.set = jest.fn<() => Promise<string | null>>().mockResolvedValue('OK');
+      mockRedis.del = jest.fn<() => Promise<number>>().mockResolvedValue(1);
+      
+      const service = TaskOperatorService.getInstance(mockRedis as any);
+      const dbService = (service as any).databaseService as DatabaseService;
+      
+      // Mock getNextReadyTask to return null
+      const getNextReadyTaskSpy = jest.spyOn(dbService, 'getNextReadyTask').mockReturnValue(null);
+      
+      // Mock releaseLock by spying on redis.del
+      const releaseLockSpy = jest.spyOn(service as any, 'releaseLock').mockResolvedValue(undefined);
+      
+      // Act
+      const result = await service.processNextTask();
+      
+      // Assert: Returns no_tasks
+      expect(result).toEqual({ processed: false, reason: 'no_tasks' });
+      expect(getNextReadyTaskSpy).toHaveBeenCalled();
+      expect(releaseLockSpy).toHaveBeenCalled();
+      
+      // Cleanup
+      getNextReadyTaskSpy.mockRestore();
+      releaseLockSpy.mockRestore();
     });
   });
 });
