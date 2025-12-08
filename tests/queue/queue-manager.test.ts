@@ -3,6 +3,7 @@ import { QueueManager, type QueueFactory, type WorkerFactory, type QueueEventsFa
 import type { AgentConfig, RecurringPromptOptions } from '../../src/queue/queue-manager.js';
 import { Queue, Worker, QueueEvents } from 'bullmq';
 import { Redis } from 'ioredis';
+import { logger } from '../../src/logger.js';
 
 // Create mock instances
 const mockQueueInstance = {
@@ -72,10 +73,14 @@ describe('QueueManager', () => {
 
   afterEach(async () => {
     if (queueManager) {
-      await queueManager.shutdown().catch(() => {
+      try {
+        await queueManager.shutdown();
+      } catch (error) {
         // Ignore shutdown errors in tests
-      });
+      }
     }
+    // Clear all mocks
+    jest.clearAllMocks();
   });
 
   describe('initialize', () => {
@@ -90,6 +95,82 @@ describe('QueueManager', () => {
       );
 
       await expect(queueManager.initialize()).rejects.toThrow('Connection failed');
+    });
+
+    it('should discover and recreate queues from Redis keys', async () => {
+      // Arrange: Mock Redis scan to return queue keys
+      // loadExistingQueues does 4 separate scans: meta, delayed, wait, active
+      // Each scan can have multiple pages (cursor != '0'), but we'll mock single-page results
+      const mockScan = jest.fn<(...args: unknown[]) => Promise<[string, string[]]>>()
+        // First scan: bull:*:meta (returns queue1 and queue3)
+        .mockResolvedValueOnce(['0', ['bull:queue1:meta', 'bull:queue3:meta']])
+        // Second scan: bull:*:delayed (returns queue2)
+        .mockResolvedValueOnce(['0', ['bull:queue2:delayed']])
+        // Third scan: bull:*:wait (returns empty)
+        .mockResolvedValueOnce(['0', []])
+        // Fourth scan: bull:*:active (returns empty)
+        .mockResolvedValueOnce(['0', []]);
+      
+      (mockRedisInstance as any).scan = mockScan;
+      
+      // Act
+      await queueManager.initialize();
+      
+      // Assert: Scan was called 4 times (once for each pattern)
+      expect(mockScan).toHaveBeenCalledTimes(4);
+      // Verify factories were called for each discovered queue (queue1, queue2, queue3)
+      expect(mockQueueFactory).toHaveBeenCalledWith('queue1', expect.any(Object));
+      expect(mockQueueFactory).toHaveBeenCalledWith('queue2', expect.any(Object));
+      expect(mockQueueFactory).toHaveBeenCalledWith('queue3', expect.any(Object));
+      expect(mockWorkerFactory).toHaveBeenCalled();
+      expect(mockQueueEventsFactory).toHaveBeenCalled();
+    });
+
+    it('should continue processing when individual queue recreation fails', async () => {
+      // Arrange: One queue fails, others succeed
+      const mockScan = jest.fn<(...args: unknown[]) => Promise<[string, string[]]>>()
+        .mockResolvedValueOnce(['0', ['bull:queue1:meta', 'bull:queue2:meta']])
+        .mockResolvedValueOnce(['0', []]) // delayed
+        .mockResolvedValueOnce(['0', []]) // wait
+        .mockResolvedValueOnce(['0', []]); // active
+      
+      (mockRedisInstance as any).scan = mockScan;
+      
+      // Make queueFactory throw for queue1 but succeed for queue2
+      let callCount = 0;
+      const failingQueueFactory = jest.fn<QueueFactory>().mockImplementation((name) => {
+        callCount++;
+        if (name === 'queue1') {
+          throw new Error('Failed to create queue1');
+        }
+        return mockQueueFactory(name);
+      });
+      
+      const queueManagerWithFailingFactory = new QueueManager(
+        mockRedisInstance as unknown as Redis,
+        undefined,
+        failingQueueFactory,
+        mockWorkerFactory,
+        mockQueueEventsFactory
+      );
+      
+      const loggerErrorSpy = jest.spyOn(logger, 'error');
+      
+      // Act
+      await queueManagerWithFailingFactory.initialize();
+      
+      // Assert: Error logged, but process continued and queue2 was created
+      expect(loggerErrorSpy).toHaveBeenCalled();
+      expect(failingQueueFactory).toHaveBeenCalledWith('queue1', expect.any(Object));
+      expect(failingQueueFactory).toHaveBeenCalledWith('queue2', expect.any(Object));
+      
+      // Cleanup
+      loggerErrorSpy.mockRestore();
+      try {
+        await queueManagerWithFailingFactory.shutdown();
+      } catch (error) {
+        // Ignore shutdown errors
+      }
     });
   });
 
