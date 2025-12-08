@@ -200,10 +200,17 @@ describe('MCPServer', () => {
 
   describe('list_agents tool', () => {
     it('should list all agents', async () => {
-      mockQueueManager.getAgentStatus.mockResolvedValue({
-        name: 'queue1',
-        isActive: true,
-      });
+      // Arrange: Mock listQueues to return queue names and getAgentStatus to return agent status
+      mockQueueManager.listQueues.mockResolvedValue(['queue1', 'queue2']);
+      mockQueueManager.getAgentStatus
+        .mockResolvedValueOnce({
+          name: 'queue1',
+          isActive: true,
+        })
+        .mockResolvedValueOnce({
+          name: 'queue2',
+          isActive: false,
+        });
 
       const handleListAgents = (
         mcpServer as unknown as {
@@ -215,6 +222,90 @@ describe('MCPServer', () => {
 
       expect(mockQueueManager.listQueues).toHaveBeenCalled();
       expect(result).toHaveProperty('content');
+      
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }> };
+      expect(resultAny.content).toBeDefined();
+      expect(resultAny.content.length).toBeGreaterThan(0);
+      expect(resultAny.content[0]).toHaveProperty('type', 'text');
+      expect(resultAny.content[0]).toHaveProperty('text');
+      
+      // Parse and assert JSON structure
+      const jsonText = resultAny.content[0].text;
+      expect(() => JSON.parse(jsonText)).not.toThrow(); // Verify it's valid JSON
+      
+      const content = JSON.parse(jsonText);
+      expect(content).toHaveProperty('agents');
+      expect(Array.isArray(content.agents)).toBe(true);
+      expect(content.agents.length).toBe(2);
+      
+      // Assert agent object structure
+      const agent1 = content.agents[0];
+      expect(agent1).toHaveProperty('name', 'queue1');
+      expect(agent1).toHaveProperty('isActive', true);
+      expect(typeof agent1.name).toBe('string');
+      expect(typeof agent1.isActive).toBe('boolean');
+      
+      const agent2 = content.agents[1];
+      expect(agent2).toHaveProperty('name', 'queue2');
+      expect(agent2).toHaveProperty('isActive', false);
+      expect(typeof agent2.name).toBe('string');
+      expect(typeof agent2.isActive).toBe('boolean');
+    });
+
+    it('should return empty array when no agents exist', async () => {
+      // Arrange: Mock listQueues to return empty array
+      mockQueueManager.listQueues.mockResolvedValue([]);
+
+      const handleListAgents = (
+        mcpServer as unknown as {
+          handleListAgents: () => Promise<unknown>;
+        }
+      ).handleListAgents.bind(mcpServer);
+
+      const result = await handleListAgents();
+
+      // Assert JSON structure
+      const resultAny = result as { content: Array<{ type: string; text: string }> };
+      const jsonText = resultAny.content[0].text;
+      const content = JSON.parse(jsonText);
+      
+      expect(content).toHaveProperty('agents');
+      expect(Array.isArray(content.agents)).toBe(true);
+      expect(content.agents.length).toBe(0);
+    });
+
+    it('should filter out null agent statuses', async () => {
+      // Arrange: Mock listQueues to return queue names, but getAgentStatus returns null for some
+      mockQueueManager.listQueues.mockResolvedValue(['queue1', 'queue2', 'queue3']);
+      mockQueueManager.getAgentStatus
+        .mockResolvedValueOnce({
+          name: 'queue1',
+          isActive: true,
+        })
+        .mockResolvedValueOnce(null) // This should be filtered out
+        .mockResolvedValueOnce({
+          name: 'queue3',
+          isActive: false,
+        });
+
+      const handleListAgents = (
+        mcpServer as unknown as {
+          handleListAgents: () => Promise<unknown>;
+        }
+      ).handleListAgents.bind(mcpServer);
+
+      const result = await handleListAgents();
+
+      // Assert JSON structure - null agents should be filtered out
+      const resultAny = result as { content: Array<{ type: string; text: string }> };
+      const jsonText = resultAny.content[0].text;
+      const content = JSON.parse(jsonText);
+      
+      expect(content).toHaveProperty('agents');
+      expect(Array.isArray(content.agents)).toBe(true);
+      expect(content.agents.length).toBe(2); // Only 2 non-null agents
+      expect(content.agents.every((a: unknown) => a !== null)).toBe(true);
     });
   });
 
