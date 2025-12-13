@@ -89,6 +89,7 @@ export class TaskOperatorService {
       });
 
       const responseText = await response.text();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let responseData: any;
 
       try {
@@ -238,6 +239,7 @@ export class TaskOperatorService {
       const cursorRunnerUrl = process.env.CURSOR_RUNNER_URL || 'http://cursor-runner:3001';
       const targetUrl = `${cursorRunnerUrl}/cursor/iterate/async`;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const requestBody: any = {
         prompt: task.prompt,
         repository: null, // Use default repositories directory
@@ -264,6 +266,7 @@ export class TaskOperatorService {
       });
 
       const responseText = await response.text();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let responseData: any;
 
       try {
