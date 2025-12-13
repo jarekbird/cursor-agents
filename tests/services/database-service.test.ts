@@ -431,7 +431,8 @@ describe('DatabaseService', () => {
       // Arrange: Table already has updatedat column (created in beforeEach)
       const setupDb = new Database(testDbPath);
       setupDb.exec(`INSERT INTO tasks (id, prompt, "order", uuid, status) VALUES (1, 'Test prompt', 0, 'test-uuid', 0)`);
-      const initialTime = new Date().toISOString();
+      // Set initial time to be clearly in the past to avoid timing race conditions
+      const initialTime = new Date(Date.now() - 1000).toISOString();
       setupDb.prepare(`UPDATE tasks SET updatedat = ? WHERE id = 1`).run(initialTime);
       setupDb.close();
       
@@ -447,7 +448,7 @@ describe('DatabaseService', () => {
       expect(task?.status).toBe(4);
       // Verify updatedat was updated (should be newer than initial time)
       if (task?.updatedat) {
-        expect(new Date(task.updatedat).getTime()).toBeGreaterThanOrEqual(new Date(initialTime).getTime());
+        expect(new Date(task.updatedat).getTime()).toBeGreaterThan(new Date(initialTime).getTime());
       }
       checkDb.close();
     });
