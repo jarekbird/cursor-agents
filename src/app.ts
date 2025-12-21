@@ -463,8 +463,6 @@ export class CursorAgentsApp {
           request_id?: string;
           error?: string;
           output?: string;
-          iterations?: number;
-          maxIterations?: number;
         };
 
         const requestId = body.requestId || body.request_id;
@@ -481,8 +479,6 @@ export class CursorAgentsApp {
           successType: typeof body.success,
           hasError: !!body.error,
           hasOutput: !!body.output,
-          iterations: body.iterations,
-          maxIterations: body.maxIterations,
           fullBody: JSON.stringify(body),
         });
 

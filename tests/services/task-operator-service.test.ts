@@ -392,7 +392,7 @@ describe('TaskOperatorService', () => {
       const releaseLockSpy = jest.spyOn(service as any, 'releaseLock').mockResolvedValue(undefined);
       
       // Act
-      await service.handleCallback(requestId, { success: true, iterations: 3 });
+      await service.handleCallback(requestId, { success: true });
       
       // Assert: Task was marked complete
       expect(markTaskCompleteSpy).toHaveBeenCalledWith(taskId);

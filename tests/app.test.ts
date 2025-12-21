@@ -967,8 +967,6 @@ describe('CursorAgentsApp', () => {
           requestId: 'test-request-id-789',
           success: true,
           output: 'Task completed successfully',
-          iterations: 5,
-          maxIterations: 10,
         };
 
         const response = await request(app.app)

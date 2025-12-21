@@ -7,7 +7,6 @@ export interface PromptJobData {
   options?: {
     repository?: string;
     branch?: string;
-    maxIterations?: number;
     [key: string]: unknown;
   };
 }

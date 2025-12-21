@@ -33,7 +33,7 @@ python create_agent.py --name "daily-check" --target-url "http://api.example.com
     --schedule "0 0 * * *" --method GET
 
 # Create an agent in a specific queue
-python create_agent.py --name "daily-note" --target-url "http://cursor-runner:3001/cursor/iterate/async" \
+python create_agent.py --name "daily-note" --target-url "http://cursor-runner:3001/cursor/execute/async" \
     --schedule "0 8 * * *" --queue "daily-tasks" \
     --body '{"prompt": "create todays daily note in the obsidian repository"}'
 ```

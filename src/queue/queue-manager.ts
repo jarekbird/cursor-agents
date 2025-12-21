@@ -10,7 +10,6 @@ export interface RecurringPromptOptions {
   options?: {
     repository?: string;
     branch?: string;
-    maxIterations?: number;
     [key: string]: unknown;
   };
 }

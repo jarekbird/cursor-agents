@@ -237,13 +237,12 @@ export class TaskOperatorService {
 
       // Send task to cursor-runner (async - callback will handle completion)
       const cursorRunnerUrl = process.env.CURSOR_RUNNER_URL || 'http://cursor-runner:3001';
-      const targetUrl = `${cursorRunnerUrl}/cursor/iterate/async`;
+      const targetUrl = `${cursorRunnerUrl}/cursor/execute/async`;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const requestBody: any = {
         prompt: task.prompt,
         repository: null, // Use default repositories directory
-        maxIterations: 5,
         callbackUrl,
         id: requestId, // Include requestId in body
       };
@@ -341,8 +340,6 @@ export class TaskOperatorService {
       success?: boolean;
       error?: string;
       output?: string;
-      iterations?: number;
-      maxIterations?: number;
     }
   ): Promise<void> {
     const pendingTask = this.pendingTasks.get(requestId);
@@ -407,7 +404,6 @@ export class TaskOperatorService {
         successType: typeof result.success,
         hasError: !!result.error,
         hasOutput: !!result.output,
-        iterations: result.iterations,
         fullResult: JSON.stringify(result),
       });
 
@@ -426,14 +422,12 @@ export class TaskOperatorService {
           logger.info('Task marked as complete after callback', {
             taskId,
             requestId,
-            iterations: result.iterations,
             hasErrorField: !!result.error, // Log if error field was present but task still succeeded
           });
         } else {
           logger.error('Failed to mark task as complete - database update returned false', {
             taskId,
             requestId,
-            iterations: result.iterations,
           });
         }
       } else {
