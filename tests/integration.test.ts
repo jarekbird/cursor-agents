@@ -3,10 +3,12 @@ import request from 'supertest';
 import { CursorAgentsApp } from '../src/app.js';
 import { QueueManager } from '../src/queue/queue-manager.js';
 import { PromptProcessor } from '../src/queue/prompt-processor.js';
+import { DatabaseService } from '../src/services/database-service.js';
 
 // Mock dependencies
 jest.mock('../src/queue/queue-manager.js');
 jest.mock('../src/queue/prompt-processor.js');
+jest.mock('../src/services/database-service.js');
 
 // Mock Bull Board
 jest.mock('@bull-board/api', () => ({
@@ -30,11 +32,23 @@ jest.mock('@bull-board/express', () => ({
 describe('Integration Tests', () => {
   let app: CursorAgentsApp;
   let mockQueueManager: jest.Mocked<QueueManager>;
+  let mockDatabaseService: jest.Mocked<DatabaseService>;
   let mockFetch: jest.MockedFunction<typeof fetch>;
 
   beforeEach(() => {
     mockFetch = jest.fn() as jest.MockedFunction<typeof fetch>;
     global.fetch = mockFetch;
+
+    // Create mock DatabaseService
+    mockDatabaseService = {
+      setSystemSetting: jest.fn<() => boolean>().mockReturnValue(true),
+      isSystemSettingEnabled: jest.fn<() => boolean>().mockReturnValue(false),
+      getNextReadyTask: jest.fn(),
+      updateTaskStatus: jest.fn(),
+      markTaskComplete: jest.fn(),
+      getTaskStatus: jest.fn(),
+      close: jest.fn(),
+    } as unknown as jest.Mocked<DatabaseService>;
 
     mockQueueManager = {
       initialize: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
@@ -66,8 +80,8 @@ describe('Integration Tests', () => {
       shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<QueueManager>;
 
-    // Inject mock QueueManager via constructor
-    app = new CursorAgentsApp(mockQueueManager);
+    // Inject mock QueueManager and DatabaseService via constructor
+    app = new CursorAgentsApp(mockQueueManager, mockDatabaseService);
   });
 
   afterEach(async () => {
@@ -142,7 +156,7 @@ describe('Integration Tests', () => {
       } as unknown as jest.Mocked<QueueManager>;
 
       // Create app with stateful mock
-      const testApp = new CursorAgentsApp(statefulMockQueueManager);
+      const testApp = new CursorAgentsApp(statefulMockQueueManager, mockDatabaseService);
       await testApp.initialize();
 
       // Step 1: POST /agents to create one-time agent
@@ -222,7 +236,7 @@ describe('Integration Tests', () => {
       } as unknown as jest.Mocked<QueueManager>;
 
       // Create app with stateful mock
-      const testApp = new CursorAgentsApp(statefulMockQueueManager);
+      const testApp = new CursorAgentsApp(statefulMockQueueManager, mockDatabaseService);
       await testApp.initialize();
 
       // Step 1: POST /agents to create recurring agent
@@ -416,7 +430,7 @@ describe('Integration Tests', () => {
 
       try {
         // Create a new app instance with the secret set
-        const testApp = new CursorAgentsApp(mockQueueManager);
+        const testApp = new CursorAgentsApp(mockQueueManager, mockDatabaseService);
         await testApp.initialize();
 
         // Test without secret (should fail)
