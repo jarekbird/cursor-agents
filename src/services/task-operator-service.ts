@@ -258,9 +258,15 @@ export class TaskOperatorService {
         callbackUrl,
       });
 
+      // Include webhook secret in headers if available
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (webhookSecret) {
+        headers['X-Webhook-Secret'] = webhookSecret;
+      }
+
       const response = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(requestBody),
       });
 

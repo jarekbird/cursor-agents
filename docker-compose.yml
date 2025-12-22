@@ -19,6 +19,8 @@ services:
       - BULLMQ_CONCURRENCY=${BULLMQ_CONCURRENCY:-5}
       # Optional: Cursor runner URL for processing prompts
       - CURSOR_RUNNER_URL=${CURSOR_RUNNER_URL:-http://cursor-runner:3001}
+      # Webhook secret for authenticating requests to cursor-runner
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
     volumes:
       # Mount shared cursor volume (contains repositories, tools, and scripts directories)
       # Tool scripts should be placed in /cursor/tools (one script per tool)
